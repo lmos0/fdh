@@ -1,0 +1,20 @@
+{
+  "name": "ferindo-direitos-humanos",
+  "private": true,
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev:server": "bun --watch server/src/index.ts",
+    "dev:client": "bun run --cwd client dev",
+    "typecheck": "tsc -p server/tsconfig.json && tsc -p client/tsconfig.json && tsc -p scripts/tsconfig.json",
+    "test": "bun test server/tests",
+    "test:mobile": "bun run build && bun scripts/mobile-smoke.ts",
+    "test:audio": "bun run build && bun scripts/audio-smoke.ts",
+    "build": "bun run --cwd client build",
+    "start": "bun server/src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "playwright": "1.65.0",
+    "typescript": "^5.9.3"
+  }
+}

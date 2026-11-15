@@ -8,7 +8,7 @@ const listeners = new Set<() => void>();
 function apply(theme: Theme) {
   current = theme;
   document.documentElement.dataset.theme = theme;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#151219" : "#f5eef2");
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#120c24" : "#efe6ff");
   for (const listener of listeners) listener();
 }
 

@@ -27,7 +27,7 @@ export function RoundTable({ snapshot, disabled, pause, answers }: {
   // Enquanto a pessoa escolhe, a quantidade já aparece na pergunta e na barra de envio.
   const choosing = room.phase === "submitting" && !isJudge && !self.submitted && !room.paused;
 
-  return <section className={`round-table ${finished ? "is-finished" : ""} ${choosing ? "is-choosing" : ""}`} aria-label="Mesa da rodada">
+  return <section className={`round-table felt ${finished ? "is-finished" : ""} ${choosing ? "is-choosing" : ""}`} aria-label="Mesa da rodada">
     <div className="game-heading"><div>{round && <span className="round-number">Rodada {round.number}</span>}<h1>{phaseTitle}</h1></div>
       {round && !finished && <button className="button secondary small pause-button" disabled={disabled}
         aria-label={room.collectivelyPaused ? "Retomar para todos" : "Pausar para todos"}

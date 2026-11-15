@@ -24,12 +24,16 @@ export function HomeScreen({ disabled, botTestModeEnabled, createRoom, joinRoom,
   }
 
   return <main className="home-layout">
-    <section className="panel entry-panel" aria-labelledby="entry-title">
-      <div className="entry-illustration" aria-hidden="true">
-        <span className="mini-card mini-card-dark"><CardFace mischievous /></span>
-        <span className="mini-card mini-card-light"><CardFace /></span>
-        <svg className="entry-spark" width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="m10 1 2.2 6.8L19 10l-6.8 2.2L10 19l-2.2-6.8L1 10l6.8-2.2L10 1Z" fill="currentColor" /></svg>
+    <div className="home-hero" aria-hidden="true">
+      <div className="hero-deck">
+        <span className="hero-card hero-card-left">Uma resposta horrível.<CardFace mischievous /></span>
+        <span className="hero-card hero-card-right">Outra pior ainda.<CardFace expression="suspicious" /></span>
+        <span className="hero-card hero-card-prompt"><span>O que estraga o almoço de domingo? <span className="hero-blank" /></span><CardFace expression="thinking" /></span>
       </div>
+      <p className="hero-title"><span>Ferindo</span><span>Direitos</span><span>Humanos</span></p>
+      <p className="hero-tag">com amigos</p>
+    </div>
+    <section className="panel entry-panel" aria-labelledby="entry-title">
       <div className="entry-heading"><h1 id="entry-title">Jogar</h1><span className="muted">3–8 jogadores</span></div>
       <div className="mode-switch" role="group" aria-label="Como jogar">
         <button type="button" aria-pressed={mode === "create"} onClick={() => setMode("create")}>Criar sala</button>

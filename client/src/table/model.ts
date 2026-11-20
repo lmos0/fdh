@@ -26,7 +26,7 @@ export const preview: TableModel = {
   imprint: "CARTA PRETA  /  01",
   cards: ["Um áudio de sete minutos.", "A sinceridade da minha avó.", "O grupo da família."].map((text, i) =>
     ({ id: `demo${i}`, text, label: `RESPOSTA  /  0${i + 1}` })),
-  backs: 2, canPick: false, result: false, zone: "hand", caption: "Uma pergunta preta. Muitas respostas questionáveis.",
+  backs: 2, canPick: false, result: false, zone: "hand", caption: "Uma pergunta. Muitas respostas questionáveis.",
 };
 
 /** Recebe apenas a projeção já autorizada para este navegador. O assento local é sempre o primeiro. */

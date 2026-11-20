@@ -5,6 +5,8 @@ export interface TableCard {
   text: string;
   label: string;
   order?: number;
+  /** Cards in a combination; extra cards show as a slightly offset stack under the first. */
+  count?: number;
 }
 export interface TableModel {
   seats: { name: string; judge?: boolean; winner?: boolean; offline?: boolean }[];
@@ -14,6 +16,8 @@ export interface TableModel {
   backs: number;
   canPick: boolean;
   result: boolean;
+  /** "hand": cards in front of the local seat. "center": cards played into the middle of the table. */
+  zone: "hand" | "center";
   caption: string;
 }
 export const preview: TableModel = {
@@ -22,7 +26,7 @@ export const preview: TableModel = {
   imprint: "CARTA PRETA  /  01",
   cards: ["Um áudio de sete minutos.", "A sinceridade da minha avó.", "O grupo da família."].map((text, i) =>
     ({ id: `demo${i}`, text, label: `RESPOSTA  /  0${i + 1}` })),
-  backs: 2, canPick: false, result: false, caption: "Uma pergunta preta. Muitas respostas questionáveis.",
+  backs: 2, canPick: false, result: false, zone: "hand", caption: "Uma pergunta preta. Muitas respostas questionáveis.",
 };
 
 /** Recebe apenas a projeção já autorizada para este navegador. O assento local é sempre o primeiro. */
@@ -36,7 +40,7 @@ export function tableModel(snapshot: Snapshot, slots: (string | null)[] = [], op
     winner: p.id === r?.result?.winnerPlayerId, offline: !p.connected,
   }));
   const model: TableModel = { seats, prompt: "Puxe uma cadeira.", imprint: "SALA  /  " + room.code,
-    cards: [], backs: 0, canPick: false, result: false, caption: `${seats.length} de 8 lugares ocupados.` };
+    cards: [], backs: 0, canPick: false, result: false, zone: "hand", caption: `${seats.length} de 8 lugares ocupados.` };
   if (!r) return model;
   const isJudge = r.judgePlayerId === self.playerId;
   model.imprint = `RODADA  /  ${String(r.number).padStart(2, "0")}`;
@@ -46,11 +50,13 @@ export function tableModel(snapshot: Snapshot, slots: (string | null)[] = [], op
     ? question.replace(/_{2,}/g, () => answers[blank++]?.replace(/\.$/, "") || "_____") : question;
   if (r.result) {
     model.result = true;
+    model.zone = "center";
     model.cards = r.result.responseTexts.map((text, i) => ({ id: `win${i}`, text, label: `+1  /  CARTA ${i + 1}` }));
     model.caption = `A combinação de ${r.result.winnerNickname} levou o ponto.`;
   } else if (room.phase === "judging") {
+    model.zone = "center";
     model.cards = r.options.map((o, i) => ({ id: o.id, text: o.responses.join(" / "),
-      label: `COMBINAÇÃO  /  ${i + 1}`, order: o.id === option ? 1 : undefined }));
+      label: `COMBINAÇÃO  /  ${i + 1}`, order: o.id === option ? 1 : undefined, count: o.responses.length }));
     model.canPick = !locked && !room.paused && isJudge;
     const chosen = r.options.find(o => o.id === option);
     model.caption = chosen ? chosen.responses.join(" / ")
@@ -58,9 +64,8 @@ export function tableModel(snapshot: Snapshot, slots: (string | null)[] = [], op
   } else if (room.phase === "submitting") {
     model.backs = r.receivedCount;
     model.canPick = !locked && !room.paused && !isJudge && !self.submitted;
-    if (!isJudge && !self.submitted) {
-      model.cards = self.hand.map((c, i) => ({ ...c, label: `SUA MÃO  /  ${i + 1}`, order: slots.indexOf(c.id) + 1 || undefined }));
-    }
+    // Everyone keeps their hand in the rack; only someone still answering can pick from it.
+    model.cards = self.hand.map((c, i) => ({ ...c, label: `SUA MÃO  /  ${i + 1}`, order: slots.indexOf(c.id) + 1 || undefined }));
     model.caption = isJudge || self.submitted ? `${r.receivedCount} de ${r.expectedCount} respostas no centro.`
       : "Toque numa carta da mesa ou escolha na sua mão abaixo.";
     if (model.canPick && answers.some(Boolean)) model.caption = answers.map(a => a || "_____").join(" / ");

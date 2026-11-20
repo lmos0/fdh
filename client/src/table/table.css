@@ -13,7 +13,17 @@
 .stage-heading i { width: 12px; height: 5px; background: #b64954; transform: rotate(-8deg); }
 .stage-heading small { color: #843444; font: inherit; font-size: .66rem; }
 .stage-view { width: 100%; aspect-ratio: 1.95; max-height: 424px; position: relative; }
-.stage-view canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y pinch-zoom; }
+/* Pinch zooms the table, not the page; the decorative preview leaves pinch to the browser. */
+.stage-view canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y; }
+.stage-preview .stage-view canvas { touch-action: pan-y pinch-zoom; }
+.stage-zoom { position: absolute; top: 8px; right: 8px; z-index: 2; display: flex; gap: 6px; }
+.stage-zoom button { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 2px solid #4d3645; border-radius: 10px;
+  color: #402936; background: #fff8ebe8; box-shadow: 0 3px 0 #392d37; font: 800 1.45rem/1 var(--display); cursor: pointer; }
+.stage-zoom button:active:not(:disabled) { translate: 0 2px; box-shadow: 0 1px 0 #392d37; }
+.stage-zoom button:disabled { opacity: .45; cursor: default; }
+.stage-zoom button:focus-visible { outline: 3px solid #b64954; outline-offset: 2px; }
+.stage-hint { position: absolute; left: 50%; bottom: 10px; z-index: 2; translate: -50% 0; max-width: calc(100% - 20px); padding: 6px 12px;
+  border-radius: 999px; color: #fff6e9; background: #1d1418d9; font: 700 .76rem/1.3 var(--mono); text-align: center; pointer-events: none; }
 .stage-foot { min-height: 56px; background: #fff8eb; border-top: 1px dashed #b6a493; color: #493947; font-size: .83rem; line-height: 1.4; }
 .stage-foot > span,.game-layout .prompt-card h2 { min-width: 0; overflow-wrap: anywhere; }
 .game-layout .prompt-card .prompt-fill { padding-inline: 0; }

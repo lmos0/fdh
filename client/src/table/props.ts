@@ -3,8 +3,13 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
 import type { TextureBundle } from "./textures";
 import { seeded } from "./textures";
 
-export const FLOOR = -1.5;
-export const TOP = 0.075;
+/**
+ * Real-world scale: 1 unit = 10 cm. The tabletop surface is y = 0 and the table is 2.0 × 0.9 m,
+ * 75 cm high. Chairs, mug, plate and glass keep their real sizes so the cards read at their true scale.
+ */
+export const FLOOR = -7.5;
+export const TOP = 0;
+export const TABLE = { halfW: 10, halfD: 4.5 };
 
 export interface SceneBuilders {
   shape<G extends T.BufferGeometry>(g: G): G;
@@ -70,7 +75,7 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     map: textures.shadowBlob, transparent: true, depthWrite: false, opacity: 0.42,
   }));
   const shadowMatTable = own(new T.MeshBasicMaterial({
-    map: textures.shadowBlob, transparent: true, depthWrite: false, opacity: 0.62,
+    map: textures.shadowBlob, transparent: true, depthWrite: false, opacity: 0.7,
   }));
 
   function lathe(points: [number, number][], segments = 44) {
@@ -86,83 +91,73 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     return m;
   }
 
-  // --- 1. Glazed Ceramic Kitchen Floor ---
+  // --- 1. Glazed terracotta kitchen floor (≈ 29 cm tiles) ---
   const floorMat = own(new T.MeshStandardMaterial({
     map: textures.tiles.map,
+    color: "#a8978a",
     bumpMap: textures.tiles.bump,
-    bumpScale: 0.035,
+    bumpScale: 0.6,
     roughnessMap: textures.tiles.rough,
     roughness: 1,
-    metalness: 0.02,
-    envMapIntensity: 0.65,
+    envMapIntensity: 0.5,
   }));
   const floor = new T.Mesh(plane, floorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = FLOOR;
-  floor.scale.set(52, 52, 1);
+  floor.scale.set(160, 160, 1);
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // --- 2. Woven Kilim Rug with Physical Thickness & Braided Fringe ---
+  // --- 2. Woven kilim rug, 3.0 × 2.0 m, 1 cm thick, with braided fringe ---
   const rugMat = own(new T.MeshStandardMaterial({
     map: textures.rug.map,
     bumpMap: textures.rug.bump,
-    bumpScale: 0.03,
-    roughness: 0.94,
-    metalness: 0,
-    envMapIntensity: 0.25,
+    bumpScale: 0.4,
+    roughness: 0.95,
+    envMapIntensity: 0.2,
   }));
-  const rugGeo = shape(new RoundedBoxGeometry(13.2, 0.024, 8.2, 2, 0.01));
-  const rug = new T.Mesh(rugGeo, rugMat);
-  rug.position.set(0, FLOOR + 0.012, 0.1);
+  const rug = new T.Mesh(shape(new RoundedBoxGeometry(30, 0.1, 20, 2, 0.04)), rugMat);
+  rug.position.set(0, FLOOR + 0.05, 0.4);
   rug.receiveShadow = true;
-  rug.castShadow = true;
   scene.add(rug);
 
-  // Subtle cream woven fringe tassels along both short ends of the rug
   const fringeMat = own(new T.MeshStandardMaterial({ color: "#dfd0b4", roughness: 0.96 }));
-  const tasselGeo = shape(new T.CylinderGeometry(0.014, 0.01, 0.22, 5));
+  const tasselGeo = shape(new T.CylinderGeometry(0.035, 0.025, 0.6, 5));
   const randFringe = seeded(17);
   for (const side of [-1, 1]) {
-    for (let z = -3.85; z <= 4.05; z += 0.22) {
+    for (let z = -9.3; z <= 10.1; z += 0.42) {
       const t = new T.Mesh(tasselGeo, fringeMat);
-      t.position.set(side * (6.6 + 0.09), FLOOR + 0.01, z + (randFringe() - 0.5) * 0.04);
-      t.rotation.set(0, (randFringe() - 0.5) * 0.16, Math.PI / 2);
+      t.position.set(side * 15.28, FLOOR + 0.03, z + (randFringe() - 0.5) * 0.1);
+      t.rotation.set(0, (randFringe() - 0.5) * 0.2, Math.PI / 2);
       t.receiveShadow = true;
       scene.add(t);
     }
   }
 
-  // --- 3. Artisan Varnished Oak Tabletop & Joinery ---
+  // --- 3. Varnished oak top (4 cm), painted apron and turned legs ---
   const tabletopMat = own(new T.MeshPhysicalMaterial({
     map: textures.wood.map,
+    color: "#e6d3bf",
     bumpMap: textures.wood.bump,
-    bumpScale: 0.022,
+    bumpScale: 0.3,
     roughnessMap: textures.wood.rough,
     roughness: 1,
-    metalness: 0.02,
-    clearcoat: 0.26,
-    clearcoatRoughness: 0.36,
-    envMapIntensity: 0.85,
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.32,
+    envMapIntensity: 0.8,
   }));
-  mesh(scene, shape(new RoundedBoxGeometry(9.8, 0.21, 4.9, 5, 0.08)), tabletopMat, 0, TOP - 0.105, 0);
+  const top = mesh(scene, shape(new RoundedBoxGeometry(TABLE.halfW * 2, 0.4, TABLE.halfD * 2, 4, 0.12)), tabletopMat, 0, TOP - 0.2, 0);
+  top.castShadow = false;
 
   const mahoganyMat = own(new T.MeshPhysicalMaterial({
     map: textures.mahogany.map,
     bumpMap: textures.mahogany.bump,
-    bumpScale: 0.016,
+    bumpScale: 0.2,
     roughness: 0.44,
     clearcoat: 0.22,
     clearcoatRoughness: 0.38,
     envMapIntensity: 0.75,
   }));
-  // Beveled under-lip & apron frame
-  mesh(scene, shape(new RoundedBoxGeometry(9.32, 0.06, 4.46, 3, 0.02)), mahoganyMat, 0, TOP - 0.23, 0);
-  mesh(scene, box, mahoganyMat, 0, TOP - 0.34, 2.08, 8.65, 0.22, 0.11);
-  mesh(scene, box, mahoganyMat, 0, TOP - 0.34, -2.08, 8.65, 0.22, 0.11);
-  for (const x of [-4.28, 4.28]) mesh(scene, box, mahoganyMat, x, TOP - 0.34, 0, 0.11, 0.22, 4.1);
-
-  // Turned painted-teal dining legs with warm brushed brass ferrules
   const legPaint = own(new T.MeshPhysicalMaterial({
     color: "#2b5e5c",
     roughness: 0.42,
@@ -176,30 +171,37 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     metalness: 0.86,
     envMapIntensity: 1.5,
   }));
-  const legShape = lathe([
-    [0, 0.14], [0.072, 0.14], [0.088, 0.22], [0.075, 0.34], [0.095, 0.72],
-    [0.128, 0.94], [0.135, 1.04], [0.104, 1.11], [0.14, 1.2], [0.146, 1.38], [0.146, 1.46], [0, 1.46],
-  ]);
-  const ferruleShape = lathe([
-    [0, 0], [0.068, 0], [0.076, 0.14], [0, 0.14],
-  ], 28);
+  // Apron 9 cm deep, set 6 cm in from the edge of the top
+  mesh(scene, box, legPaint, 0, TOP - 0.85, 3.85, 17.4, 0.9, 0.22);
+  mesh(scene, box, legPaint, 0, TOP - 0.85, -3.85, 17.4, 0.9, 0.22);
+  for (const x of [-9.0, 9.0]) mesh(scene, box, legPaint, x, TOP - 0.85, 0, 0.22, 0.9, 7.5);
+  mesh(scene, shape(new RoundedBoxGeometry(18.6, 0.08, 8.4, 2, 0.03)), mahoganyMat, 0, TOP - 0.44, 0);
 
-  for (const x of [-4.24, 4.24]) {
-    for (const z of [-2.02, 2.02]) {
+  // 7.5 cm turned legs, 71 cm from floor to the underside of the top
+  const legShape = lathe([
+    [0, 0.3], [0.24, 0.3], [0.29, 0.5], [0.25, 0.8], [0.27, 1.6], [0.33, 3.6], [0.38, 4.5],
+    [0.39, 4.85], [0.27, 5.15], [0.36, 5.45], [0.38, 5.6], [0, 5.6],
+  ]);
+  const legBlock = shape(new RoundedBoxGeometry(0.62, 1.5, 0.62, 2, 0.04));
+  const ferruleShape = lathe([[0, 0], [0.23, 0], [0.25, 0.32], [0, 0.32]], 28);
+  for (const x of [-8.85, 8.85]) {
+    for (const z of [-3.7, 3.7]) {
       mesh(scene, legShape, legPaint, x, FLOOR, z);
+      mesh(scene, legBlock, legPaint, x, TOP - 1.15, z);
       mesh(scene, ferruleShape, brassMat, x, FLOOR, z);
-      addContactShadow(scene, plane, shadowMatSoft, x, FLOOR + 0.028, z, 0.65, 0.65);
+      addContactShadow(scene, plane, shadowMatSoft, x, FLOOR + 0.11, z, 1.4, 1.4);
     }
   }
-  // Broad soft ambient-occlusion shadow under the table
-  addContactShadow(scene, plane, shadowMatTable, 0, FLOOR + 0.026, 0.08, 11.4, 6.4);
+  // Broad soft ambient occlusion under the table, on top of the rug
+  addContactShadow(scene, plane, shadowMatTable, 0, FLOOR + 0.105, 0, 25, 14);
 
   // --- 4. Kitchen Props (All carefully positioned outside the card play zone) ---
 
   // 4a. Softly Draped Folded Gingham Kitchen Towel
   const towelGroup = new T.Group();
-  towelGroup.position.set(-3.6, TOP, -1.44);
+  towelGroup.position.set(-7.9, TOP, -2.3);
   towelGroup.rotation.y = 0.15;
+  towelGroup.scale.setScalar(1.7);
   scene.add(towelGroup);
 
   const towelMat = own(new T.MeshStandardMaterial({
@@ -233,8 +235,10 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
 
   // 4b. Artisan Speckled Ceramic Coffee Mug with Espresso Crema
   const mug = new T.Group();
-  mug.position.set(-3.78, TOP + 0.05, -1.5);
+  mug.position.set(-8.05, TOP + 0.085, -2.35);
   mug.rotation.y = 0.56;
+  // 9 cm wide, 9 cm tall
+  mug.scale.set(1.6, 1.95, 1.6);
   scene.add(mug);
 
   const mugOuterMat = own(new T.MeshPhysicalMaterial({
@@ -289,7 +293,10 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
 
   // 4c. Stoneware Plate & Sculpted Wood-Fired Pizza Slice
   const plate = new T.Group();
-  plate.position.set(3.72, TOP, -1.44);
+  plate.position.set(8.1, TOP, -2.15);
+  plate.rotation.y = 0.3;
+  // 22 cm dessert plate
+  plate.scale.setScalar(1.75);
   scene.add(plate);
 
   const plateMat = own(new T.MeshPhysicalMaterial({
@@ -413,7 +420,9 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
 
   // 4d. Pressed Cork Coaster & Crystal-Clear Pub Glass with Amber Drink + Creamy Foam
   const drink = new T.Group();
-  drink.position.set(4.24, TOP, -0.44);
+  drink.position.set(8.75, TOP, 3.2);
+  // 9 cm tumbler on a 10 cm cork coaster
+  drink.scale.setScalar(1.75);
   scene.add(drink);
 
   const corkMat = own(new T.MeshStandardMaterial({
@@ -590,6 +599,8 @@ export function createSeatKit(
     rail.rotation.x = 0.06;
 
     addContactShadow(c, plane, shadowMat, 0, 0.027, 0.04, 1.25, 1.18);
+    // Modelled at half scale: 46 cm seat, 88 cm crest rail, 43 cm wide.
+    c.scale.setScalar(4.9);
     return c;
   }
 
@@ -628,6 +639,8 @@ export function createSeatKit(
     }
 
     addContactShadow(g, plane, shadowMat, 0.06, 0.003, 0.02, 0.75, 0.58);
+    // 22 cm mallet on a 10 cm sounding block
+    g.scale.setScalar(2.3);
     return g;
   }
 

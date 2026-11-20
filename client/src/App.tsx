@@ -75,7 +75,7 @@ export default function App() {
       createTestRoom={nickname => run(send("room.create", { nickname, mode: "test" }))}
       joinRoom={(code, nickname) => run(send("room.join", { code, nickname }))} />
       : snapshot.room.phase === "lobby" ? <LobbyScreen snapshot={snapshot} disabled={disabled} copyInvite={() => void copyInvite()} copied={copied} configure={settings => run(send("room.configure", settings))} start={() => run(send("game.start", {}))} />
-      : <GameScreen key={snapshot.room.round?.id ?? "finished"} snapshot={snapshot} revealRoundId={connection.revealRoundId} disabled={disabled} submit={(roundId, cardIds) => run(send("round.submit", { roundId, cardIds }))} judge={(roundId, optionId) => run(send("round.judge", { roundId, optionId }))} pause={(roundId, paused) => run(send("game.pause", { roundId, paused }))} advance={roundId => run(send("round.advance", { roundId }))} leave={leave} />}
+      : <GameScreen snapshot={snapshot} revealRoundId={connection.revealRoundId} disabled={disabled} submit={(roundId, cardIds) => run(send("round.submit", { roundId, cardIds }))} judge={(roundId, optionId) => run(send("round.judge", { roundId, optionId }))} pause={(roundId, paused) => run(send("game.pause", { roundId, paused }))} advance={roundId => run(send("round.advance", { roundId }))} leave={leave} />}
     <footer className="site-footer">Reinícios do servidor apagam as partidas.</footer>
   </div>;
 }

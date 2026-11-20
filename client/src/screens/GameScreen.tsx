@@ -12,6 +12,8 @@ import { chooseCard, emptySelection, moveCard } from "../selection";
 import { RoundTable } from "../components/RoundTable";
 import { PlayerAvatar } from "../components/PlayerAvatar";
 import { ResultParticles } from "../components/ResultParticles";
+import { TableStage } from "../table/TableStage";
+import { tableModel } from "../table/model";
 
 /** Uma carta virada por resposta esperada: mostra o andamento sem revelar quem enviou. */
 function SubmissionProgress({ received, expected }: { received: number; expected: number }) {
@@ -86,7 +88,14 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
     : room.phase === "judging" && isJudge ? round?.options.find(option => option.id === selectedOption)?.responses ?? []
     : [];
 
+  function inspectOption(id: string) {
+    if (!isJudge || locked || room.phase !== "judging") return;
+    if (selectedOption !== id) playSound("select");
+    setSelectedOption(id);
+  }
   return <div ref={layout} className={`room-layout game-layout phase-${room.phase}`} style={{ "--submission-dock-height": `${dockHeight}px` } as CSSProperties}>
+    <TableStage model={tableModel(snapshot, selection.slots, selectedOption, disabled, promptAnswers)}
+      title={`Mesa ${room.code}`} pick={room.phase === "judging" ? inspectOption : toggleCard} />
     <div className="table-side">
       <RoundTable snapshot={snapshot} disabled={disabled} pause={pause} answers={promptAnswers} />
       <aside className="panel roster-panel"><div className="section-heading"><h2>Placar</h2><span className="count-pill">Meta: {room.settings.targetScore} pts</span></div>
@@ -131,10 +140,7 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
         {room.phase === "judging" && <section className="play-section" aria-labelledby="judging-heading">
           <div className="section-heading"><h2 id="judging-heading">{isJudge ? "Escolha a vencedora" : `${judgeName} está escolhendo a vencedora`}</h2>
             <span className="count-pill">{round.options.length} {round.options.length === 1 ? "combinação" : "combinações"}</span></div>
-          <AnswerOptions options={round.options} selectedId={selectedOption} ownTexts={submittedTexts} onSelect={id => {
-            if (selectedOption !== id) playSound("select");
-            setSelectedOption(id);
-          }} disabled={locked || !isJudge} />
+          <AnswerOptions options={round.options} selectedId={selectedOption} ownTexts={submittedTexts} onSelect={inspectOption} disabled={locked || !isJudge} />
           {isJudge && <div className={`action-bar ${selectedOption ? "is-ready" : ""}`}><span>{selectedOption ? "A escolha é definitiva." : "Toque em uma combinação para escolher."}</span>
             <button className="button primary" disabled={locked || !selectedOption} onClick={() => selectedOption && judge(round.id, selectedOption)}>Escolher vencedora</button></div>}
         </section>}

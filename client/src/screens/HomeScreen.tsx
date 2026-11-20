@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
-import { CardFace } from "../components/CardFace";
+import { TableStage } from "../table/TableStage";
+import { preview } from "../table/model";
 
 export function HomeScreen({ disabled, botTestModeEnabled, createRoom, joinRoom, createTestRoom }: {
   disabled: boolean; createRoom: (nickname: string) => void; joinRoom: (code: string, nickname: string) => void;
@@ -23,15 +24,12 @@ export function HomeScreen({ disabled, botTestModeEnabled, createRoom, joinRoom,
     else joinRoom(code.trim().toUpperCase(), nickname.trim());
   }
 
-  return <main className="home-layout">
-    <div className="home-hero" aria-hidden="true">
-      <div className="hero-deck">
-        <span className="hero-card hero-card-left">Uma resposta horrível.<CardFace mischievous /></span>
-        <span className="hero-card hero-card-right">Outra pior ainda.<CardFace expression="suspicious" /></span>
-        <span className="hero-card hero-card-prompt"><span>O que estraga o almoço de domingo? <span className="hero-blank" /></span><CardFace expression="thinking" /></span>
-      </div>
-      <p className="hero-title"><span>Ferindo</span><span>Direitos</span><span>Humanos</span></p>
-      <p className="hero-tag">com amigos</p>
+  return <main className="home-layout edition-home">
+    <div className="edition-intro">
+      <span className="edition-kicker">FDH com amigos · Edição de mesa</span>
+      <h2>Quem deixou isso no baralho?</h2>
+      <p>Complete a frase. Dispute a risada do juiz.</p>
+      <TableStage model={preview} title="A mesa está posta" preview />
     </div>
     <section className="panel entry-panel" aria-labelledby="entry-title">
       <div className="entry-heading"><h1 id="entry-title">Jogar</h1><span className="muted">3–8 jogadores</span></div>

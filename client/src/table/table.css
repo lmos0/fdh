@@ -1,0 +1,57 @@
+.table-stage {
+  min-width: 0; overflow: hidden; position: relative; isolation: isolate;
+  color: #352834; background: #f4e9db;
+  border: 2px solid #392d37; border-radius: 18px; box-shadow: 0 5px 0 #392d37, 0 14px 32px #30253220;
+}
+.table-stage::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-conic-gradient(from 45deg, #c6b6aa28 0 25%, transparent 0 50%) 50% / 56px 56px;
+}
+.stage-heading,.stage-foot { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+.stage-heading { background: #fff8eb; border-bottom: 1px dashed #b6a493; font: 700 .72rem/1.3 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+.stage-heading span { display: inline-flex; align-items: center; gap: 9px; }
+.stage-heading i { width: 12px; height: 5px; background: #b64954; transform: rotate(-8deg); }
+.stage-heading small { color: #843444; font: inherit; font-size: .66rem; }
+.stage-view { width: 100%; aspect-ratio: 1.95; max-height: 424px; position: relative; }
+.stage-view canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; touch-action: pan-y pinch-zoom; }
+.stage-foot { min-height: 56px; background: #fff8eb; border-top: 1px dashed #b6a493; color: #493947; font-size: .83rem; line-height: 1.4; }
+.stage-foot > span,.game-layout .prompt-card h2 { min-width: 0; overflow-wrap: anywhere; }
+.game-layout .prompt-card .prompt-fill { padding-inline: 0; }
+.camera-switch { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; border: 2px solid #4d3645;
+  border-radius: 9px; padding: 5px 12px; min-height: 44px; font: 700 .73rem var(--display); color: #402936; background: #ffe4dd; }
+.camera-switch[aria-pressed="true"] { background: #62384e; color: #fff6e9; }
+.stage-poster { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; }
+.stage-poster > * { display: grid; place-items: center; width: 22%; height: 64%; border: 2px solid #392d37; border-radius: 9px; color: #fff8eb; background: #332b36;
+  font: 900 clamp(1.5rem,4vw,3rem) var(--display); box-shadow: 0 8px 10px #171e2370; }
+.stage-poster > :first-child { rotate: -13deg; translate: 11% 4%; background: #a43853; }
+.stage-poster > :last-child { rotate: 12deg; translate: -11% 4%; background: #fcf4df; color: #332d29; }
+.stage-poster b { z-index: 1; }
+.table-stage.stage-fallback:not(.stage-preview) .stage-view { display: none; }
+.home-layout.edition-home { display: grid; max-width: 1060px; grid-template-columns: minmax(0, 1.5fr) minmax(300px, .92fr); gap: clamp(18px,3vw,46px); align-items: center; }
+.edition-intro { min-width: 0; }
+.edition-kicker { color: var(--accent); font: bold .73rem var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+.edition-intro h2 { margin: 6px 0 10px; font: 900 clamp(2.3rem,5.1vw,4.7rem)/.97 var(--display); letter-spacing: -.055em; }
+.edition-intro > p { color: var(--muted); margin: 0 0 18px; font-size: 1rem; }
+.room-layout.game-layout { grid-template-columns: minmax(0,1.75fr) minmax(290px,1fr); grid-template-rows: auto auto auto; grid-template-areas: "scene info" "main roster" "history roster"; align-items: start; }
+.game-layout > .table-stage { grid-area: scene; }
+.game-layout .table-side { display: contents; }
+.game-layout .round-table { grid-area: info; }
+.game-layout .roster-panel { grid-area: roster; }
+.lobby-layout .table-stage { margin-bottom: 20px; }
+@media (max-width:760px) {
+  .home-layout.edition-home { display: flex; flex-direction: column; align-items: stretch; max-width: 520px; gap: 16px; }
+  .edition-intro h2 { font-size: 2.15rem; }
+  .edition-intro > p { margin-bottom: 10px; font-size: .88rem; }
+  .stage-preview .stage-view { max-height: 180px; }
+  .stage-foot { padding: 7px 12px; font-size: .77rem; }
+  .room-layout.game-layout { grid-template-columns: minmax(0,1fr); grid-template-areas: "scene" "info" "main" "roster" "history"; }
+  .game-layout .game-main { grid-area: main; }
+  .game-layout > .winning-history { grid-area: history; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  .edition-intro .table-stage { display: none; }
+}
+/* Soft warm lamp-light vignette over the WebGL scene; purely decorative. */
+.stage-ready .stage-view::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 78% 74% at 50% 45%, transparent 56%, rgba(28, 16, 12, 0.34) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 228, 0.25); }

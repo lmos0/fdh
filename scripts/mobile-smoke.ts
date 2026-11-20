@@ -555,8 +555,14 @@ async function clocksByTouch(browser: Browser, deviceName: string) {
 }
 
 try {
-  for (const profile of [{ engine: chromium, device: "Pixel 7" }, { engine: webkit, device: "iPhone 13 Mini" }]) {
-    const browser = await profile.engine.launch();
+  // Chromium headless only has SwiftShader (software GL, no parallel shader compile): each 3D table stalls
+  // its page for seconds and three players exceed the UI timeouts. The 3D table in Chromium is covered by
+  // test:3d; here Chromium exercises the classic fallback view and WebKit keeps the WebGL table.
+  for (const profile of [
+    { engine: chromium, device: "Pixel 7", args: ["--disable-3d-apis"] },
+    { engine: webkit, device: "iPhone 13 Mini", args: [] },
+  ]) {
+    const browser = await profile.engine.launch({ args: profile.args });
     try {
       await layoutMatrix(browser, profile.device);
       await featureFlagByTouch(browser, profile.device);

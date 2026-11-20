@@ -3,6 +3,8 @@ import type { Settings, Snapshot } from "../../../shared/protocol";
 import { PlayerList } from "../components/PlayerList";
 import { PHASE_TIME_LIMITS, RESULT_INTERVALS } from "../../../shared/protocol";
 import { CardFace } from "../components/CardFace";
+import { TableStage } from "../table/TableStage";
+import { tableModel } from "../table/model";
 
 const MIN_PLAYERS = 3;
 
@@ -75,9 +77,10 @@ export function LobbyScreen({ snapshot, disabled, configure, start, copyInvite, 
         <p>O anfitrião pode avançar o resultado antes do intervalo ou escolher avanço apenas manual. As últimas 30 combinações vencedoras ficam no histórico da partida.</p>
       </details>
     </section>
-    <aside className="panel roster-panel"><div className="section-heading"><h2>Jogadores</h2><span className="count-pill">{room.players.length}/8</span></div>
+    <aside><TableStage model={tableModel(snapshot)} title="Lugares à mesa" />
+    <div className="panel roster-panel"><div className="section-heading"><h2>Jogadores</h2><span className="count-pill">{room.players.length}/8</span></div>
       <PlayerList players={room.players} selfId={self.playerId} hostId={room.hostPlayerId} />
       {missing > 0 && <ul className="empty-seats" aria-hidden="true">{Array.from({ length: missing }, (_, index) => <li key={index}><span className="seat-mark">+</span>Aguardando jogador…</li>)}</ul>}
-    </aside>
+    </div></aside>
   </div>;
 }

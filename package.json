@@ -8,6 +8,7 @@
     "typecheck": "tsc -p server/tsconfig.json && tsc -p client/tsconfig.json && tsc -p scripts/tsconfig.json",
     "test": "bun test server/tests",
     "test:mobile": "bun run build && bun scripts/mobile-smoke.ts",
+    "test:3d": "bun run build && bun scripts/table-smoke.ts",
     "test:audio": "bun run build && bun scripts/audio-smoke.ts",
     "build": "bun run --cwd client build",
     "start": "bun server/src/index.ts"

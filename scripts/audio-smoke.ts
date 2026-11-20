@@ -310,7 +310,9 @@ async function rewardFlow(browser: Browser, name: string) {
 
 try {
   for (const engine of [chromium, webkit]) {
-    const browser = await engine.launch();
+    // Chromium headless only has SwiftShader (no parallel shader compile), so several 3D tables stall the
+    // pages past the UI timeouts. 3D in Chromium is covered by test:3d; here it uses the classic view.
+    const browser = await engine.launch({ args: engine === chromium ? ["--disable-3d-apis"] : [] });
     try {
       await audioFlow(browser, engine.name());
       await unavailableAudio(browser, engine.name());

@@ -1,8 +1,24 @@
-# Ferindo Direitos Humanos com amigos
+# Ferindo Direitos Humanos com amigos — edição Mesa 3D
 
 Jogo de cartas multiplayer para grupos de amigos. Salas privadas, catálogo de humor adulto e estado temporário em memória.
 
-**Stack:** React + TypeScript + Vite, CSS comum e HTTP/WebSockets nativos do Bun. Sem banco de dados, Redis, framework HTTP ou autenticação por contas.
+**Stack:** React + TypeScript + Vite, Three.js (WebGL 2) e HTTP/WebSockets nativos do Bun.
+
+### Jogar a edição 3D
+
+Com Bun instalado, execute na raiz:
+
+```sh
+bun install --frozen-lockfile
+bun run build
+ENABLE_BOT_TEST_MODE=true bun run start
+```
+
+Abra **http://localhost:3000**, informe o apelido e escolha **Testar com 2 bots** para jogar sozinho ou **Criar minha sala** para receber amigos. Na sala de espera, selecione **Começar a partida**. Para disponibilizar só o multiplayer, inicie sem a variável de bots.
+
+A câmera começa no seu assento. Use o botão com a câmera para alternar para a vista de cima. Toque em uma carta 3D para levantá-la e ler a seleção ampliada; confirme na barra **Enviar resposta**. O juiz pode selecionar uma combinação direto na mesa e confirmar em **Escolher vencedora**. As cartas viradas chegam ao centro, sem identificar o remetente; a mão local permanece privada. No resultado, a combinação e o assento vencedor ficam dourados.
+
+O cenário, os assentos, o martelo e a arte das cartas são gerados localmente em `client/src/table/`, sem modelos ou imagens remotos. O renderizador é carregado sob demanda e só desenha quadros quando necessário. Os controles de cartas abaixo da cena oferecem o mesmo jogo por teclado, em telas pequenas ou se WebGL estiver indisponível.
 
 ## Desenvolvimento
 
@@ -48,7 +64,7 @@ O Vite encaminha `/ws`, `/api` e `/health` para a porta 3000. A porta do backend
 
 O juiz aparece em uma faixa com martelo acima da pergunta e com destaque e marcador **Juiz** no placar. A própria pessoa vê **Você é o juiz desta rodada**. Os indicadores acompanham o rodízio e a reconexão; as instruções diferenciam envio de respostas e julgamento, inclusive no mobile e nos dois temas.
 
-Identidade de jogo de cartas: fundo de mesa com holofote e pontilhado, contornos grossos "de tinta", sombras duras, botões 3D que afundam ao toque e títulos em caixa alta. A mesa da rodada é sempre um feltro escuro (classe `.felt`, que reaplica os tokens do tema escuro), nos dois temas. Paleta arcade: rosa forte na ação principal, ciano/violeta como destaque e dourado para vitória. A tela inicial tem um título com leque de cartas decorativo. Cada pessoa recebe uma ficha de avatar com cor derivada do apelido, igual para todos na sala. Não há fontes externas, imagens baixadas ou dependências visuais. Animações (distribuição das cartas, pulso no botão pronto, revelação do vencedor) só rodam sem preferência por movimento reduzido.
+A tela inicial mostra uma mesa de cozinha, substituída no lobby pelos lugares dos participantes reais. O tampo de madeira clara tem um pano xadrez, uma caneca e a última fatia de pizza nos cantos. Os nomes dos jogadores aparecem em etiquetas junto às cadeiras. O martelo acompanha o juiz no rodízio. A combinação vencedora aparece em dourado. Quem usa movimento reduzido vê as mesmas mudanças de estado sem deslocamentos ou viradas animadas.
 
 O botão de sol/lua no cabeçalho alterna entre tema claro e escuro, no jogo e no catálogo. Sem uma escolha salva, a interface acompanha o tema do sistema. A escolha manual fica em `localStorage` (`fdh.theme`), persiste ao recarregar e sincroniza entre abas da mesma origem. Se o armazenamento estiver bloqueado, a troca continua funcionando naquela página. Alterar o tema não recarrega o jogo nem interfere na sessão. Cartas de resposta permanecem brancas nos dois temas; instruções adicionais ficam nas regras recolhidas do lobby.
 
@@ -61,6 +77,7 @@ O botão de sol/lua no cabeçalho alterna entre tema claro e escuro, no jogo e n
 | `bun run typecheck` | Verificação de tipos do servidor e cliente. |
 | `bun test` | Testes de regras, privacidade, protocolo e HTTP/WebSocket reais. |
 | `bun run test:mobile` | Build e validação mobile em Chromium/Android e WebKit/iPhone. |
+| `bun run test:3d` | Build e partida com seleção pelo cenário WebGL, troca de câmera e perda do contexto em Chromium. |
 | `bun run test:audio` | Build e validação de áudio em Chromium e WebKit, com nós Web Audio reais. |
 | `bun run build` | Gera `client/dist`. |
 | `bun run start` | Servidor de produção na porta 3000 ou em `PORT`. |
@@ -95,7 +112,7 @@ O teste mobile cobre:
 - Contraste mínimo de 4.5:1 nos tokens principais de texto/controles, respostas brancas com texto preto e cor da barra do navegador sincronizada ao tema.
 - Formulários com área útil reduzida e busca que libera o foco ao confirmar; uma nova rodada volta à pergunta.
 
-**Limite da validação:** são navegadores com emulação mobile, não aparelhos físicos. A área reduzida simula o espaço ocupado pelo teclado, mas não abre um teclado nativo de Android/iOS. Antes de compartilhar amplamente, é recomendável uma conferência em um Android e um iPhone reais, especialmente de teclado, clipboard, barra do navegador e interrupções de rede.
+**Limite da validação:** são navegadores com emulação mobile, não aparelhos físicos. No Chromium, `test:mobile` e `test:audio` rodam sem WebGL (`--disable-3d-apis`) e validam a vista clássica: o Chromium headless só oferece GPU por software (SwiftShader, sem compilação paralela de shaders), e várias mesas 3D simultâneas travariam as páginas além dos limites de tempo. A mesa 3D no Chromium é coberta por `test:3d`, e o WebKit continua usando WebGL nos testes mobile e de áudio. A área reduzida simula o espaço ocupado pelo teclado, mas não abre um teclado nativo de Android/iOS. Antes de compartilhar amplamente, é recomendável uma conferência em um Android e um iPhone reais, especialmente de teclado, clipboard, barra do navegador e interrupções de rede.
 
 ### Sons
 
@@ -159,7 +176,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 
 ### Mesa, revelação e navegação
 
-- Rodada, fase, relógio, juiz e pergunta ficam na **mesa**, com a pergunta apoiada numa pequena pilha visual. No desktop a mesa e o placar ocupam uma coluna lateral fixa, ao lado da mão, das opções ou do resultado; no celular a mesa vem primeiro, mais compacta, seguida da jogada, do placar e do histórico. A sequência **Responder → Julgar → Resultado** indica a fase atual (no celular, três segmentos sob o título da fase); a instrução principal reflete o papel local (por exemplo, “Escolha 2 cartas” ou “Sua vez de julgar”).
+- No desktop, a mesa 3D e o painel com o texto completo da pergunta ficam lado a lado; a mão e o placar aparecem abaixo. No celular, a mesa compacta vem primeiro, seguida da pergunta, da jogada, do placar e do histórico. A sequência **Responder → Julgar → Resultado** indica a fase atual; a instrução principal reflete o papel local (por exemplo, “Escolha 2 cartas” ou “Sua vez de julgar”).
 - O relógio mostra o tempo e uma barra que esvazia; nos últimos dez segundos ela muda de cor. O placar mostra a meta, a pontuação e o progresso de cada pessoa até ela.
 - Enquanto as respostas chegam, juiz e quem já enviou veem **uma carta virada por resposta esperada**, sem revelar quem enviou. No julgamento, a pergunta é preenchida com a combinação que o juiz tocou, e cada pessoa reconhece a própria combinação pelo marcador **Sua resposta**, visível só para ela. A barra de escolha do juiz acompanha a tela depois que uma combinação é tocada.
 - O cabeçalho fica compacto durante a partida: marca curta, sala e conexão, áudio e menu. Catálogo, convite, tema e saída ficam no menu secundário, que fecha com Escape, toque fora ou escolha de ação. No lobby, o código da sala e o botão de convite ficam em destaque no próprio painel da sala de espera.

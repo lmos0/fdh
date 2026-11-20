@@ -1,27 +1,57 @@
 import * as T from "three";
 import type { TableModel } from "./model";
-import { cardPrint } from "./print";
+import { CARD_ASPECT, cardPrint, type PrintKind } from "./print";
 import { createTextureBundle, seeded } from "./textures";
-import { addContactShadow, buildEnvScene, buildRoomAndTable, createSeatKit, FLOOR, TOP } from "./props";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { addContactShadow, buildEnvScene, buildRoomAndTable, createSeatKit, FLOOR, TABLE, TOP } from "./props";
+
+const ROOM = "#3b2b23";
+/** Big-format cards, 8.4 × 11.8 cm (1 unit = 10 cm), with the 5:7 ratio of real playing cards. */
+const CW = 0.84, CH = CW / CARD_ASPECT;
+/** Cardstock lying on a table bows a little: 1.2 mm across the width. */
+const CURL = 0.012;
+const STOCK = 0.006;
+/** Height of a lying card's group so its back clears the tabletop. */
+const LAY = STOCK + 0.002;
+const FLAT = -Math.PI / 2;
+const RACK_Z = 3.55, CENTER_Z = 1.75, PROMPT_Z = -0.65;
+/** The hand stands in a walnut card rack, leaning back 30° from upright; the prompt sits on a small easel. */
+const RACK = { lean: 1.05, seat: 0.17, front: 0.12, length: 7.8 };
+const EASEL = { lean: 1.2, seat: 0.1, front: 0.1 };
+const leanUp = (lean: number) => new T.Vector3(0, Math.sin(lean), -Math.cos(lean));
+const leanOut = (lean: number) => new T.Vector3(0, Math.cos(lean), Math.sin(lean));
+const WHITE_DECK = { x: -3.85, z: -0.35, yaw: -0.1, h: 0.34 };
+const BLACK_DECK = { x: -2.45, z: -0.6, yaw: 0.08, h: 0.24 };
+const PILE = { x: 2.4, z: -0.4 };
 
 type Film = ReturnType<typeof cardPrint>;
-type Kind = Parameters<typeof cardPrint>[2];
-const TAU = Math.PI * 2;
-const ROOM = "#b59d86";
+interface Spawn { x: number; y: number; z: number; roll: number }
 
 /** On-demand renderer: only resize, selection, hover, camera glides and short card movements cost frames. */
-export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void, onReady?: () => void) {
+export interface TableOptions {
+  /** Ctrl/⌘ + wheel, pinch, drag-to-pan and zoomBy(); off for the decorative home preview. */
+  zoomable?: boolean;
+  onZoom?: (zoom: number) => void;
+  /** A plain wheel over the canvas scrolls the page; the stage can explain how to zoom instead. */
+  onWheelHint?: () => void;
+}
+
+/** Also used by TableStage.tsx for the zoom buttons. */
+const MAX_ZOOM = 3.5;
+
+export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void, onReady?: () => void,
+  options: TableOptions = {}) {
   const renderer = new T.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: "high-performance" });
   renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
   renderer.setClearColor(ROOM, 1);
   renderer.toneMapping = T.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.02;
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFShadowMap;
 
   const scene = new T.Scene();
-  scene.fog = new T.Fog(ROOM, 16, 36);
-  const camera = new T.PerspectiveCamera(30, 2, 0.5, 80);
+  scene.fog = new T.Fog(ROOM, 40, 90);
+  const camera = new T.PerspectiveCamera(36, 2, 1, 260);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   const anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 16);
 
@@ -38,7 +68,7 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   function shape<G extends T.BufferGeometry>(g: G) { geometries.add(g); return g; }
   function trackTex<X extends T.Texture>(t: X) { textures.add(t); return t; }
 
-  // --- Lighting & Warm Dining-Room Studio Environment ---
+  // --- Warm dining-room environment for reflections ---
   const pmrem = new T.PMREMGenerator(renderer);
   const envScene = buildEnvScene();
   const envMap = pmrem.fromScene(envScene, 0.045).texture;
@@ -51,160 +81,169 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   });
   pmrem.dispose();
   scene.environment = envMap;
-  scene.environmentIntensity = 0.56;
+  scene.environmentIntensity = 0.32;
 
-  const hemi = new T.HemisphereLight(0xfff1dc, 0x5c3a28, 0.48);
-  const lamp = new T.SpotLight(0xffe0b5, 5.6, 0, 0.56, 0.9, 0.22);
-  lamp.position.set(-1.6, 12.2, -1.2);
-  lamp.target.position.set(0, 0, 0.3);
+  // --- Lighting: one warm pendant over the table, its pool of light fading into the room ---
+  const hemi = new T.HemisphereLight(0xffeedc, 0x3a261c, 0.26);
+  const lamp = new T.SpotLight(0xffdcae, 1750, 0, 0.56, 1, 2);
+  lamp.position.set(-1.2, 17, 1.2);
+  lamp.target.position.set(0, 0, 0.4);
   lamp.castShadow = true;
   lamp.shadow.mapSize.set(2048, 2048);
-  lamp.shadow.radius = 4.2;
+  lamp.shadow.radius = 5;
   lamp.shadow.blurSamples = 16;
-  lamp.shadow.bias = -0.0003;
-  lamp.shadow.normalBias = 0.015;
-  lamp.shadow.camera.near = 6;
-  lamp.shadow.camera.far = 20;
-
-  const rim = new T.DirectionalLight(0xb8ddff, 0.46);
-  rim.position.set(6.4, 5.6, 7.2);
-
-  const warmBack = new T.PointLight(0xffc680, 0.72, 16, 1.6);
-  warmBack.position.set(-4.8, 3.2, -3.4);
-
+  lamp.shadow.bias = -0.0002;
+  lamp.shadow.normalBias = 0.02;
+  lamp.shadow.camera.near = 8;
+  lamp.shadow.camera.far = 40;
+  const rim = new T.DirectionalLight(0xbcd9ff, 0.38);
+  rim.position.set(14, 9, 16);
+  const warmBack = new T.PointLight(0xffb36b, 0.5, 0, 0);
+  warmBack.position.set(-20, 9, -16);
   scene.add(hemi, lamp, lamp.target, rim, warmBack);
 
-  // --- Procedural PBR Textures, Room, Table & Props ---
+  // --- Room, table and props ---
   const tex = createTextureBundle(anisotropy, trackTex);
   const builders = { shape, own, solid, textures: tex };
   const { plane, mahoganyMat, brassMat, shadowMatSoft } = buildRoomAndTable(scene, builders);
   const seatKit = createSeatKit(builders, mahoganyMat, brassMat, plane, shadowMatSoft);
 
-  // --- Cards: Beveled Heavy Linen Cardstock with Front & Back Art ---
-  const outline = new T.Shape();
-  const cr = 0.068;
-  outline.moveTo(-0.5 + cr, -0.625);
-  outline.lineTo(0.5 - cr, -0.625); outline.quadraticCurveTo(0.5, -0.625, 0.5, -0.625 + cr);
-  outline.lineTo(0.5, 0.625 - cr); outline.quadraticCurveTo(0.5, 0.625, 0.5 - cr, 0.625);
-  outline.lineTo(-0.5 + cr, 0.625); outline.quadraticCurveTo(-0.5, 0.625, -0.5, 0.625 - cr);
-  outline.lineTo(-0.5, -0.625 + cr); outline.quadraticCurveTo(-0.5, -0.625, -0.5 + cr, -0.625);
-
-  const faceGeo = shape(new T.ShapeGeometry(outline, 10));
-  const uv = faceGeo.attributes.uv, pos = faceGeo.attributes.position;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, pos.getX(i) + 0.5, (pos.getY(i) + 0.625) / 1.25);
-
-  const backFaceGeo = shape(faceGeo.clone());
-  backFaceGeo.rotateY(Math.PI);
-
-  const STOCK = 0.015;
-  const BEVEL = 0.004;
-  const bodyGeo = shape(new T.ExtrudeGeometry(outline, {
-    depth: STOCK,
-    bevelEnabled: true,
-    bevelThickness: BEVEL,
-    bevelSize: BEVEL,
-    bevelSegments: 2,
-    curveSegments: 10,
-  }));
-  // Position body so front printed face sits cleanly on z = +0.0008 and back face on z = -(STOCK + 2*BEVEL) - 0.0008
-  bodyGeo.translate(0, 0, -STOCK - BEVEL - 0.0008);
-  backFaceGeo.translate(0, 0, -STOCK - BEVEL * 2 - 0.0016);
-
-  // Realistic Draw Deck Stack on the left (striated stacked-card block + top askew sheets)
-  const DECK_X = -2.55, DECK_Z = -0.6;
-  const DECK_H = 0.21;
-  const deckGroup = new T.Group();
-  deckGroup.position.set(DECK_X, TOP, DECK_Z);
-  deckGroup.rotation.y = 0.19;
-  scene.add(deckGroup);
-
-  const deckBlockGeo = shape(new T.ExtrudeGeometry(outline, {
-    depth: DECK_H,
-    bevelEnabled: true,
-    bevelThickness: 0.004,
-    bevelSize: 0.004,
-    bevelSegments: 2,
-    curveSegments: 10,
-  }));
-  // Map side UVs cleanly along extrusion depth so striated paper-edge lines wrap horizontally around the deck
-  const dPos = deckBlockGeo.attributes.position, dUv = deckBlockGeo.attributes.uv;
-  for (let i = 0; i < dUv.count; i++) {
-    dUv.setXY(i, (dPos.getX(i) + dPos.getY(i)) * 1.5, dPos.getZ(i) / DECK_H);
+  // --- Cards: two printed sheets with die-cut corners (alphaTest), bowed like real cardstock ---
+  function bow(g: T.BufferGeometry) {
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const u = p.getX(i) / (CW / 2);
+      p.setZ(i, p.getZ(i) + CURL * u * u);
+    }
+    g.computeVertexNormals();
+    return g;
   }
-  const deckEdgeMat = own(new T.MeshStandardMaterial({
-    map: tex.deckEdge,
-    roughness: 0.82,
-    metalness: 0,
-  }));
-  const deckBlock = new T.Mesh(deckBlockGeo, deckEdgeMat);
-  deckBlock.scale.set(0.83, 0.83, 1);
-  deckBlock.rotation.x = -Math.PI / 2;
-  deckBlock.position.y = 0.004;
-  deckBlock.castShadow = deckBlock.receiveShadow = true;
-  deckGroup.add(deckBlock);
+  const faceGeo = shape(bow(new T.PlaneGeometry(CW, CH, 8, 10)));
+  const backGeo = new T.PlaneGeometry(CW, CH, 8, 10);
+  backGeo.rotateY(Math.PI);
+  shape(bow(backGeo)).translate(0, 0, -STOCK);
 
-  // Add 3 subtly askew individual cards near the top of the deck for organic hand-dealt realism
-  const jitter = seeded(7);
-  for (let i = 0; i < 3; i++) {
-    const loose = new T.Mesh(bodyGeo, solid(i % 2 ? "#f4ece0" : "#e9decb", 0.78));
-    loose.scale.set(0.83, 0.83, 1);
-    loose.position.set((jitter() - 0.5) * 0.022, DECK_H + 0.014 + i * 0.017, (jitter() - 0.5) * 0.022);
-    loose.rotation.set(-Math.PI / 2, 0, (jitter() - 0.5) * 0.055);
-    loose.castShadow = loose.receiveShadow = true;
-    deckGroup.add(loose);
+  function cardMaterial(map: Film, kind: PrintKind) {
+    const gold = kind === "gold", black = kind === "black", back = kind === "back" || kind === "promptBack";
+    return new T.MeshPhysicalMaterial({
+      map,
+      alphaTest: 0.5,
+      bumpMap: tex.linen.bump,
+      bumpScale: gold ? 0.25 : 0.35,
+      roughnessMap: gold ? undefined : tex.linen.rough,
+      roughness: gold ? 0.3 : black ? 0.9 : back ? 0.66 : 0.86,
+      metalness: gold ? 0.55 : 0,
+      clearcoat: gold ? 0.5 : back ? 0.12 : 0,
+      clearcoatRoughness: gold ? 0.22 : 0.5,
+      envMapIntensity: gold ? 1.5 : back ? 0.5 : black ? 0.2 : 0.25,
+      // A touch of self-illumination keeps the print readable where the lamp light falls off.
+      emissive: 0xffffff,
+      emissiveMap: map,
+      emissiveIntensity: black ? 0.08 : gold ? 0.05 : back ? 0.03 : 0.04,
+    });
   }
-  addContactShadow(deckGroup, plane, shadowMatSoft, 0.02, 0.003, 0.02, 1.06, 1.3);
-  const deckTop = TOP + DECK_H + 0.068;
-
-  // Shared card back material for the reverse side of every playing card
-  const reverseTex = cardPrint("", "", "back");
-  reverseTex.anisotropy = anisotropy;
-  trackTex(reverseTex);
-  const reverseMat = own(new T.MeshPhysicalMaterial({
-    map: reverseTex,
-    bumpMap: tex.linen.bump,
-    bumpScale: 0.006,
-    roughnessMap: tex.linen.rough,
-    roughness: 0.62,
-    clearcoat: 0.08,
-    clearcoatRoughness: 0.52,
-    envMapIntensity: 0.45,
-  }));
+  function staticPrint(kind: PrintKind) {
+    const t = trackTex(cardPrint("", "", kind));
+    t.anisotropy = anisotropy;
+    return own(cardMaterial(t, kind));
+  }
+  const reverseMat = staticPrint("back");
+  const promptReverseMat = staticPrint("promptBack");
 
   const covers = new Map<string, { texture: Film; mat: T.MeshPhysicalMaterial }>();
   let used = new Set<string>();
-  function print(text: string, label: string, kind: Kind, order = 0) {
-    const key = JSON.stringify([text, label, kind, order]);
+  function printKey(text: string, label: string, kind: PrintKind, order = 0) {
+    return JSON.stringify([text, label, kind, order]);
+  }
+  function print(text: string, label: string, kind: PrintKind, order = 0) {
+    const key = printKey(text, label, kind, order);
     used.add(key);
     if (!covers.has(key)) {
       const texture = cardPrint(text, label, kind, order);
       texture.anisotropy = anisotropy;
-      const gold = kind === "gold";
-      const black = kind === "black";
-      const back = kind === "back";
-      covers.set(key, {
-        texture,
-        mat: new T.MeshPhysicalMaterial({
-          map: texture,
-          bumpMap: tex.linen.bump,
-          bumpScale: gold ? 0.004 : 0.006,
-          roughnessMap: gold ? undefined : tex.linen.rough,
-          roughness: gold ? 0.26 : black ? 0.94 : back ? 0.78 : 0.92,
-          metalness: gold ? 0.56 : 0,
-          clearcoat: gold ? 0.52 : back ? 0.08 : 0,
-          clearcoatRoughness: gold ? 0.2 : 0.52,
-          envMapIntensity: gold ? 1.65 : back ? 0.42 : black ? 0.16 : 0.2,
-          // Gentle self-illumination keeps cards readable at grazing angles without washing out ink or dark stock
-          emissive: 0xffffff,
-          emissiveMap: texture,
-          emissiveIntensity: black ? 0.09 : gold ? 0.08 : back ? 0.04 : 0.03,
-        }),
-      });
+      covers.set(key, { texture, mat: cardMaterial(texture, kind) });
     }
     return covers.get(key)!.mat;
   }
 
-  // --- Seats: Handcrafted Chairs, Folded Cardstock Place Tents & Judge's Gavel ---
+  // --- Draw piles: a striated block of stacked cards with a couple of loose cards on top ---
+  const outline = new T.Shape();
+  const r = 0.045, hw = CW / 2, hh = CH / 2;
+  outline.moveTo(-hw + r, -hh);
+  outline.lineTo(hw - r, -hh); outline.quadraticCurveTo(hw, -hh, hw, -hh + r);
+  outline.lineTo(hw, hh - r); outline.quadraticCurveTo(hw, hh, hw - r, hh);
+  outline.lineTo(-hw + r, hh); outline.quadraticCurveTo(-hw, hh, -hw, hh - r);
+  outline.lineTo(-hw, -hh + r); outline.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
+  const deckEdgeWhite = own(new T.MeshStandardMaterial({ map: tex.deckEdge, roughness: 0.85 }));
+  const deckEdgeBlack = own(new T.MeshStandardMaterial({ map: tex.deckEdge, color: "#3d3644", roughness: 0.8 }));
+  const shadowMatCard = own(new T.MeshBasicMaterial({ map: tex.cardShadow, transparent: true, depthWrite: false, opacity: 0.55 }));
+
+  function sheet(parent: T.Object3D, front: T.Material, back: T.Material) {
+    const f = new T.Mesh(faceGeo, front);
+    const b = new T.Mesh(backGeo, back);
+    f.castShadow = true;
+    f.receiveShadow = b.receiveShadow = true;
+    parent.add(f, b);
+    return f;
+  }
+
+  function deck(spec: typeof WHITE_DECK, top: T.Material, edge: T.Material, seed: number) {
+    const group = new T.Group();
+    group.position.set(spec.x, TOP, spec.z);
+    group.rotation.y = spec.yaw;
+    scene.add(group);
+    const bevel = 0.006;
+    const geo = shape(new T.ExtrudeGeometry(outline, {
+      depth: spec.h, bevelEnabled: true, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 6,
+    }));
+    // Striations wrap horizontally around the block, one line per card
+    const p = geo.attributes.position, uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, (p.getX(i) + p.getY(i)) * 2, p.getZ(i) / spec.h * (spec.h / 0.12));
+    const block = new T.Mesh(geo, edge);
+    block.rotation.x = FLAT;
+    block.position.y = bevel;
+    block.castShadow = block.receiveShadow = true;
+    group.add(block);
+    const jitter = seeded(seed);
+    for (let i = 0; i < 2; i++) {
+      const loose = new T.Group();
+      loose.position.set((jitter() - 0.5) * 0.06, spec.h + bevel * 2 + LAY + i * 0.014, (jitter() - 0.5) * 0.06);
+      loose.rotation.set(FLAT, (jitter() - 0.5) * 0.12, 0, "YXZ");
+      sheet(loose, top, top);
+      group.add(loose);
+    }
+    addContactShadow(group, plane, shadowMatCard, 0, 0.003, 0, CW * 1.3, CH * 1.22);
+    return spec.h + bevel * 2 + 0.03;
+  }
+  const whiteTop = deck(WHITE_DECK, reverseMat, deckEdgeWhite, 7);
+  const blackTop = deck(BLACK_DECK, promptReverseMat, deckEdgeBlack, 11);
+
+  // --- Walnut card rack in front of the local seat and a little easel for the prompt ---
+  function block(parent: T.Object3D, w: number, h: number, d: number, at: T.Vector3, tiltX = 0) {
+    const m = new T.Mesh(shape(new RoundedBoxGeometry(w, h, d, 2, Math.min(h, d) * 0.3)), mahoganyMat);
+    m.position.copy(at);
+    m.rotation.x = tiltX;
+    m.castShadow = m.receiveShadow = true;
+    parent.add(m);
+  }
+  function stand(z: number, length: number, spec: typeof EASEL, backHeight: number) {
+    const group = new T.Group();
+    group.position.set(0, TOP, z);
+    scene.add(group);
+    const up = leanUp(spec.lean), out = leanOut(spec.lean);
+    const bottom = new T.Vector3(0, spec.seat, spec.front);
+    block(group, length, spec.seat, 0.66, new T.Vector3(0, spec.seat / 2, 0));
+    // Lip in front of the cards' bottom edge
+    block(group, length, 0.16, 0.08, new T.Vector3(0, spec.seat + 0.06, spec.front + 0.06));
+    // Back rest the cards lean against
+    block(group, length * 0.82, backHeight, 0.06,
+      bottom.clone().addScaledVector(up, backHeight / 2 + 0.05).addScaledVector(out, -STOCK - 0.04), spec.lean - Math.PI / 2);
+    addContactShadow(group, plane, shadowMatSoft, 0, 0.004, -0.1, length * 1.12, 1.6);
+  }
+  stand(RACK_Z, RACK.length, RACK, 0.3);
+  stand(PROMPT_Z, 1.3, EASEL, 0.7);
+
+  // --- Seats: chairs, folded place cards with the name on both faces and the judge's gavel ---
   const seatGroup = new T.Group();
   scene.add(seatGroup);
   const seatTextures: T.Texture[] = [], seatMaterials: T.Material[] = [];
@@ -213,135 +252,154 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     seatTextures.splice(0).forEach(t => t.dispose());
     seatMaterials.splice(0).forEach(m => m.dispose());
   }
-  const tentFaceGeo = shape(new T.BoxGeometry(1, 0.34, 0.012));
+  const TENT_W = 1.7, TENT_H = 0.62;
+  const tentFaceGeo = shape(new T.BoxGeometry(TENT_W, TENT_H, 0.02));
+  // (column, side): side 1 is the local player's long side, -1 the far side, 0 the two ends.
+  const PLACES: [number, number][] = [[0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1]];
+  const PAINT = ["#c9573f", "#4f7d95", "#8a6aa6", "#6f8b45"];
+
+  function tentTexture(s: TableModel["seats"][number], color: string) {
+    const c = document.createElement("canvas");
+    c.width = 512;
+    c.height = 188;
+    const g = c.getContext("2d")!;
+    const highlight = s.winner || s.judge;
+    const grad = highlight ? g.createLinearGradient(0, 0, 512, 188) : g.createLinearGradient(0, 0, 0, 188);
+    if (highlight) {
+      grad.addColorStop(0, "#fae08e"); grad.addColorStop(0.5, "#ffeeb4"); grad.addColorStop(1, "#e5b546");
+    } else {
+      grad.addColorStop(0, "#fffdf8"); grad.addColorStop(1, "#f1e6d4");
+    }
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 512, 188);
+    g.fillStyle = color;
+    g.fillRect(0, 0, 512, 18);
+    g.textAlign = "center";
+    const tag = s.judge ? "★ JUIZ" : s.winner ? "★ PONTO!" : s.offline ? "AUSENTE" : "";
+    if (tag) {
+      g.font = `800 28px ui-monospace, Menlo, monospace`;
+      g.fillStyle = "#7d223e";
+      g.fillText(tag, 256, 60);
+    }
+    g.fillStyle = s.offline ? "#5d5560" : "#180f2c";
+    g.font = `800 ${tag ? 62 : 72}px "Helvetica Neue", Arial, sans-serif`;
+    g.fillText(s.name, 256, tag ? 142 : 124, 470);
+    const t = new T.CanvasTexture(c);
+    t.colorSpace = T.SRGBColorSpace;
+    t.anisotropy = anisotropy;
+    return t;
+  }
 
   let seatKey = "";
+  /** Top corners of every place card, so the seat view always frames who is at the table. */
+  const tentBounds: T.Vector3[] = [];
   function seats(list: TableModel["seats"]) {
-    if (seatKey === JSON.stringify(list)) return;
+    if (seatKey === JSON.stringify(list)) return false;
     seatKey = JSON.stringify(list);
     clearSeats();
+    tentBounds.length = 0;
     list.forEach((s, i) => {
-      const places = [[0, 1], [0.61, 1], [1, 0], [0.61, -1], [0, -1], [-0.61, -1], [-1, 0], [-0.61, 1]];
-      const [x, z] = places[Math.round(i * places.length / list.length) % places.length];
-      const color = s.offline ? "#7e858c" : s.winner ? "#e6ab2e" : ["#d65a44", "#588299", "#9474ad", "#7c944c"][i % 4];
+      const [col, side] = PLACES[Math.round(i * PLACES.length / list.length) % PLACES.length];
+      const color = s.offline ? "#7e858c" : s.winner ? "#e6ab2e" : PAINT[i % PAINT.length];
+      const end = side === 0;
+      // Neighbours on the local player's side sit a little further out, clear of the rack.
+      const x = col * (side > 0 ? 7 : 6.5);
       if (i !== 0) {
-        const c = seatKit.chair(color);
-        c.position.set(z === 0 ? x * 5.55 : x * 5.04, FLOOR, z === 0 ? 0 : z * 2.95);
-        c.rotation.y = z === 0 ? x * TAU / 4 : z < 0 ? TAU / 2 : 0;
-        seatGroup.add(c);
+        const chair = seatKit.chair(color);
+        if (end) chair.position.set(col * (TABLE.halfW + 1.5), FLOOR, 0);
+        else chair.position.set(x, FLOOR, side * (TABLE.halfD + 1.35));
+        chair.rotation.y = end ? col * Math.PI / 2 : side < 0 ? Math.PI : 0;
+        seatGroup.add(chair);
       }
 
-      // Crisp folded thick-cardstock place card tent
       const highlight = s.winner || s.judge;
-      const t = new T.CanvasTexture((() => {
-        const c = document.createElement("canvas");
-        c.width = 512;
-        c.height = 176;
-        const g = c.getContext("2d")!;
-        if (highlight) {
-          const grad = g.createLinearGradient(0, 0, 512, 176);
-          grad.addColorStop(0, "#fae08e");
-          grad.addColorStop(0.5, "#ffeeb4");
-          grad.addColorStop(1, "#e5b546");
-          g.fillStyle = grad;
-        } else {
-          const grad = g.createLinearGradient(0, 0, 0, 176);
-          grad.addColorStop(0, "#fffdf8");
-          grad.addColorStop(1, "#f4ead9");
-          g.fillStyle = grad;
-        }
-        g.fillRect(0, 0, 512, 176);
-        g.fillStyle = color;
-        g.fillRect(0, 0, 512, 20);
-        g.textAlign = "center";
-        const tag = s.judge ? "★ JUIZ" : s.winner ? "★ PONTO!" : s.offline ? "AUSENTE" : "";
-        if (tag) {
-          g.font = `800 26px ui-monospace, Menlo, monospace`;
-          g.fillStyle = "#7d223e";
-          g.fillText(tag, 256, 58);
-        }
-        g.fillStyle = "#180f2c";
-        g.font = `800 ${tag ? 58 : 66}px "Helvetica Neue", Arial, sans-serif`;
-        g.fillText(s.name, 256, tag ? 132 : 118, 464);
-        g.strokeStyle = "rgba(24,15,44,0.22)";
-        g.lineWidth = 4;
-        g.strokeRect(2, 2, 508, 172);
-        return c;
-      })());
-      t.colorSpace = T.SRGBColorSpace;
-      t.anisotropy = anisotropy;
+      const t = tentTexture(s, color);
       const m = new T.MeshPhysicalMaterial({
-        map: t,
-        bumpMap: tex.linen.bump,
-        bumpScale: 0.004,
-        roughness: highlight ? 0.36 : 0.68,
-        metalness: highlight ? 0.25 : 0,
-        clearcoat: highlight ? 0.3 : 0.08,
+        map: t, bumpMap: tex.linen.bump, bumpScale: 0.2,
+        roughness: highlight ? 0.4 : 0.7, metalness: highlight ? 0.2 : 0, clearcoat: highlight ? 0.3 : 0.06,
+        emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.05,
       });
       seatTextures.push(t);
       seatMaterials.push(m);
 
       const tent = new T.Group();
-      tent.position.set(z === 0 ? x * 4.3 : x * 4.35, TOP, z === 0 ? 0.2 : z < 0 ? -2.26 : 2.02);
-      tent.rotation.y = z === 0 ? -x * 0.5 : 0;
+      if (i === 0) {
+        tent.position.set(-RACK.length / 2 - 1.15, TOP, RACK_Z + 0.1);
+        tent.rotation.y = 0.12;
+      } else if (end) {
+        tent.position.set(col * (TABLE.halfW - 1.15), TOP, 0.1);
+        tent.rotation.y = -col * 0.62;
+      } else {
+        tent.position.set(x, TOP, side * (TABLE.halfD - 0.8));
+      }
       seatGroup.add(tent);
-
-      const lean = 0.32, half = 0.34 / 2;
-      const front = new T.Mesh(tentFaceGeo, m);
-      front.castShadow = front.receiveShadow = true;
-      front.position.set(0, Math.cos(lean) * half, Math.sin(lean) * half);
-      front.rotation.x = -lean;
-      tent.add(front);
-
-      const back = new T.Mesh(tentFaceGeo, solid(highlight ? "#e3b247" : "#ece0cc", 0.78));
-      back.castShadow = back.receiveShadow = true;
-      back.position.set(0, Math.cos(lean) * half, -Math.sin(lean) * half);
-      back.rotation.x = lean;
-      tent.add(back);
-
-      addContactShadow(tent, plane, shadowMatSoft, 0, 0.003, 0, 1.15, 0.38);
+      const lean = 0.3, half = TENT_H / 2;
+      for (const dir of [1, -1]) {
+        const face = new T.Mesh(tentFaceGeo, m);
+        face.castShadow = face.receiveShadow = true;
+        face.position.set(0, Math.cos(lean) * half, dir * Math.sin(lean) * half);
+        // Both leaves lean in toward the fold; the back leaf is turned around so its name reads from behind.
+        face.rotation.set(-lean, dir > 0 ? 0 : Math.PI, 0, "YXZ");
+        tent.add(face);
+      }
+      addContactShadow(tent, plane, shadowMatSoft, 0, 0.004, 0, TENT_W * 1.15, 0.75);
+      tent.updateMatrixWorld();
+      for (const x of [-TENT_W / 2, TENT_W / 2]) tentBounds.push(tent.localToWorld(new T.Vector3(x, TENT_H, 0)));
 
       if (s.judge) {
         const gavel = seatKit.gavel();
+        // Next to the judge's place card, handle toward the judge, clear of cards and props
+        if (i === 0) gavel.position.set(RACK.length / 2 + 1.0, TOP, RACK_Z - 0.75);
+        else if (end) gavel.position.set(col * (TABLE.halfW - 2.8), TOP, 0.9);
+        else gavel.position.set(x + (col > 0 ? -1.9 : 1.9), TOP, side * (TABLE.halfD - 1.95));
+        gavel.rotation.y = side < 0 ? Math.PI / 2 + 0.3 : -Math.PI / 2 - 0.3;
         seatGroup.add(gavel);
-        // Place gavel proudly near the judge without ever clipping into cards or corner props
-        let gx: number, gz: number;
-        if (z === 1 && x === 0) { gx = 1.55; gz = 1.92; }
-        else if (z === 0) { gx = x * 3.85; gz = 0.95; }
-        else if (z < 0) {
-          gx = x === 0 ? 1.18 : x * 3.55 + (x > 0 ? -0.85 : 0.85);
-          gz = -1.84;
-        } else {
-          gx = x * 3.55;
-          gz = 1.88;
-        }
-        gavel.position.set(gx, TOP, gz);
-        gavel.rotation.y = -0.45;
+        gavel.updateMatrixWorld();
+        for (const x of [-0.5, 1.9]) tentBounds.push(gavel.localToWorld(new T.Vector3(x / 2.3, 0.3, 0)));
       }
     });
+    return true;
   }
 
-  // --- Cards State, Smooth Camera Transitions & On-Demand Render Loop ---
+  // --- Card pieces, camera and the on-demand render loop ---
   interface Piece {
     group: T.Group;
     face: T.Mesh;
-    body: T.Mesh;
-    target: T.Vector3;
-    scale: number;
+    shadow: T.Mesh;
+    pos: T.Vector3;
     tilt: number;
     yaw: number;
+    roll: number;
+    scale: number;
+    /** Offset and extra tilt while hovered: flat cards are tipped up, cards in the rack slide up. */
+    lift: T.Vector3;
+    liftTilt: number;
     action?: string;
+    order: number;
+    inRack: boolean;
+    printKey: string;
+    /** A card just played from the rack: it keeps its print and lands face down on the pile. */
+    faceDown?: boolean;
+    /** Extra cards of the same play fly to this pile card and are removed when they arrive. */
+    leaving?: string;
   }
   const pieces = new Map<string, Piece>();
   let hittable: T.Object3D[] = [];
   let frame = 0, disposed = false, overhead = false, initial = true, hovered: string | undefined;
 
-  const frameTarget = new T.Vector3(0, -0.15, 0.25);
+  const frameTarget = new T.Vector3(0, 0.3, 0.8);
   const camPos = new T.Vector3();
   const camGoal = new T.Vector3();
-  let fogNearGoal = 15, fogFarGoal = 30;
+  // Zoom dollies the camera toward a focus point on the table; pan moves that focus within the table.
+  let zoom = 1, fitDistance = 30;
+  const viewDir = new T.Vector3(0, 0.8, 1).normalize();
+  const pan = new T.Vector3();
+  const lookPos = new T.Vector3(), lookGoal = new T.Vector3();
+  let fogNearGoal = 40, fogFarGoal = 90;
   let camReady = false;
   const goal = new T.Vector3();
+  const euler = new T.Euler(0, 0, 0, "YXZ");
+  const turn = new T.Quaternion();
 
   // Shaders compile in the background (KHR_parallel_shader_compile) instead of stalling the page for
   // seconds on the first frame. Compilation starts one frame after mount so the first update()'s
@@ -366,62 +424,73 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   function draw() {
     frame = 0;
     let moving = false;
+    const snap = reduce.matches;
 
-    // Smoothly glide camera when switching viewpoints (instant if prefers-reduced-motion)
     if (camReady) {
-      if (!reduce.matches && camPos.distanceToSquared(camGoal) > 0.0004) {
-        camPos.lerp(camGoal, 0.16);
+      if (!snap && (camPos.distanceToSquared(camGoal) > 0.002 || lookPos.distanceToSquared(lookGoal) > 0.0005)) {
+        camPos.lerp(camGoal, 0.18);
+        lookPos.lerp(lookGoal, 0.18);
         moving = true;
       } else {
         camPos.copy(camGoal);
+        lookPos.copy(lookGoal);
       }
       camera.position.copy(camPos);
-      camera.lookAt(frameTarget);
+      camera.lookAt(lookPos);
       const fog = scene.fog as T.Fog;
-      fog.near += (fogNearGoal - fog.near) * (reduce.matches ? 1 : 0.16);
-      fog.far += (fogFarGoal - fog.far) * (reduce.matches ? 1 : 0.16);
+      fog.near += (fogNearGoal - fog.near) * (snap ? 1 : 0.16);
+      fog.far += (fogFarGoal - fog.far) * (snap ? 1 : 0.16);
     }
 
-    for (const p of pieces.values()) {
-      const isHovered = Boolean(p.action && p.action === hovered);
-      const pos = p.group.position;
-      goal.copy(p.target);
-      if (isHovered) {
-        goal.y += 0.16;
-        goal.z += 0.08;
+    for (const [key, p] of pieces) {
+      if (p.leaving && p.group.position.distanceToSquared(p.pos) < 0.0004) { drop(key, p); continue; }
+      const lifted = Boolean(p.action && p.action === hovered);
+      goal.copy(p.pos);
+      let tilt = p.tilt;
+      if (lifted) {
+        goal.add(p.lift);
+        tilt += p.liftTilt;
       }
-      if (!reduce.matches && pos.distanceToSquared(goal) > 0.00004) {
-        pos.lerp(goal, 0.24);
+      euler.set(tilt, p.yaw, p.roll);
+      turn.setFromEuler(euler);
+      const g = p.group;
+      if (!snap && (g.position.distanceToSquared(goal) > 0.00002 || g.quaternion.angleTo(turn) > 0.002)) {
+        g.position.lerp(goal, 0.2);
+        g.quaternion.slerp(turn, 0.2);
         moving = true;
       } else {
-        pos.copy(goal);
+        g.position.copy(goal);
+        g.quaternion.copy(turn);
       }
+      const sc = p.scale * (lifted ? 1.04 : 1);
+      g.scale.setScalar(snap ? sc : g.scale.x + (sc - g.scale.x) * 0.25);
+      if (Math.abs(g.scale.x - sc) > 0.001) moving = true;
 
-      const targetTilt = p.tilt + (isHovered ? 0.08 : 0);
-      const rx = p.group.rotation.x;
-      const tilt = !reduce.matches && Math.abs(rx - targetTilt) > 0.003 ? rx + (targetTilt - rx) * 0.22 : targetTilt;
-      if (tilt !== targetTilt) moving = true;
-      p.group.rotation.set(tilt, p.yaw, 0, "YXZ");
-
-      const targetScale = p.scale * (isHovered ? 1.035 : 1);
-      const curScale = p.group.scale.x;
-      const sc = !reduce.matches && Math.abs(curScale - targetScale) > 0.001 ? curScale + (targetScale - curScale) * 0.24 : targetScale;
-      if (sc !== targetScale) moving = true;
-      p.group.scale.set(sc, sc, 1);
+      // The contact shadow stays on the table and fades and spreads as the card rises
+      const height = Math.max(0, g.position.y - LAY);
+      p.shadow.visible = height < 0.6;
+      p.shadow.position.set(g.position.x, TOP + 0.003, g.position.z);
+      p.shadow.rotation.z = p.yaw;
+      const spread = 1 + height * 0.25;
+      p.shadow.scale.set(CW * 1.26 * g.scale.x * spread, CH * 1.2 * g.scale.x * spread, 1);
+      (p.shadow.material as T.MeshBasicMaterial).opacity = 0.5 / (1 + height * 1.6);
     }
 
     renderer.render(scene, camera);
     if (moving) invalidate();
   }
 
-  // Frame the table, chairs and props for any aspect ratio by finding the closest fitting camera distance.
-  const bounds = [
-    [-5.6, 0.3, 0], [5.6, 0.3, 0], [-3.4, 0.3, -3.3], [3.4, 0.3, -3.3],
-    [-4.95, TOP, 2.5], [4.95, TOP, 2.5], [-4.95, TOP, -2.5], [4.95, TOP, -2.5], [0, FLOOR + 0.6, 2.6],
+  // Frame the play area for any aspect ratio by finding the closest camera distance that fits it.
+  const playBounds = [
+    [-RACK.length / 2, 0, RACK_Z + 0.45], [RACK.length / 2, 0, RACK_Z + 0.45], [-RACK.length / 2, 1.6, RACK_Z - 0.5],
+    [RACK.length / 2, 1.6, RACK_Z - 0.5], [-4.4, 0.4, -1.5], [3.0, 0.2, -1.5], [0, 1.4, -1.5],
+  ].map(([x, y, z]) => new T.Vector3(x, y, z));
+  const overheadBounds = [
+    [-TABLE.halfW, 0, -TABLE.halfD], [TABLE.halfW, 0, -TABLE.halfD], [-TABLE.halfW, 0, TABLE.halfD], [TABLE.halfW, 0, TABLE.halfD],
   ].map(([x, y, z]) => new T.Vector3(x, y, z));
   const probe = new T.Vector3();
 
-  function fits(dir: T.Vector3, distance: number) {
+  function fits(dir: T.Vector3, distance: number, bounds: T.Vector3[]) {
     camera.position.copy(frameTarget).addScaledVector(dir, distance);
     camera.lookAt(frameTarget);
     camera.updateMatrixWorld();
@@ -437,86 +506,94 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     if (!w || !h) return;
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
-    const dir = (overhead ? new T.Vector3(0, 14, 1.4) : new T.Vector3(0, 9.4, 7.9)).normalize();
-    let lo = 4, hi = 60;
-    for (let i = 0; i < 24; i++) {
+    viewDir.set(0, overhead ? 1 : 0.8, overhead ? 0.14 : 1).normalize();
+    const bounds = overhead ? overheadBounds : [...playBounds, ...tentBounds];
+    let lo = 4, hi = 200;
+    for (let i = 0; i < 26; i++) {
       const mid = (lo + hi) / 2;
-      if (fits(dir, mid)) hi = mid;
+      if (fits(viewDir, mid, bounds)) hi = mid;
       else lo = mid;
     }
-    camGoal.copy(frameTarget).addScaledVector(dir, hi);
-    fogNearGoal = hi + 0.8;
-    fogFarGoal = hi + 14;
+    fitDistance = hi;
+    aim(snap);
+  }
+
+  function aim(snap: boolean) {
+    // The further in, the further the focus may wander; fully zoomed out it is back on the play area.
+    const reach = 1 - 1 / zoom;
+    pan.set(T.MathUtils.clamp(pan.x, -(TABLE.halfW - 1) * reach, (TABLE.halfW - 1) * reach), 0,
+      T.MathUtils.clamp(pan.z, -TABLE.halfD * reach, TABLE.halfD * reach));
+    lookGoal.copy(frameTarget).add(pan);
+    const distance = fitDistance / zoom;
+    camGoal.copy(lookGoal).addScaledVector(viewDir, distance);
+    fogNearGoal = distance + 6;
+    fogFarGoal = distance + 60;
     if (snap || !camReady || reduce.matches) {
       camPos.copy(camGoal);
-      camera.position.copy(camPos);
-      camera.lookAt(frameTarget);
+      lookPos.copy(lookGoal);
       const fog = scene.fog as T.Fog;
       fog.near = fogNearGoal;
       fog.far = fogFarGoal;
-    } else {
-      // Restore current camera position so draw() smoothly interpolates to camGoal
-      camera.position.copy(camPos);
-      camera.lookAt(frameTarget);
     }
+    camera.position.copy(camPos);
+    camera.lookAt(lookPos);
     camReady = true;
+    // Zoomed in, one finger pans the view; otherwise it keeps scrolling the page.
+    canvas.style.touchAction = zoom > 1.001 ? "none" : "";
     invalidate();
   }
 
   const observer = new ResizeObserver(() => resize(true));
   observer.observe(canvas);
 
+  function drop(key: string, p: Piece) {
+    scene.remove(p.group, p.shadow);
+    (p.shadow.material as T.Material).dispose();
+    pieces.delete(key);
+  }
+
+  const flatLift = new T.Vector3(0, 0.32, 0.2);
+  const rackLift = leanUp(RACK.lean).multiplyScalar(0.2);
+
   function update(model: TableModel) {
-    seats(model.seats);
+    if (seats(model.seats) && camReady) resize(initial);
     used = new Set();
     hittable = [];
     const live = new Set<string>();
 
-    function card(
-      id: string,
-      text: string,
-      label: string,
-      kind: Kind,
-      x: number,
-      y: number,
-      z: number,
-      w: number,
-      tilt: number,
-      yaw: number,
-      order = 0,
-      action?: string,
-    ) {
+    function card(id: string, text: string, label: string, kind: PrintKind, x: number, y: number, z: number,
+      opts: { tilt?: number; yaw?: number; order?: number; action?: string; from?: Spawn; lift?: T.Vector3 } = {}) {
       live.add(id);
+      const { tilt = FLAT, yaw = 0, order = 0, action, from, lift = flatLift } = opts;
       let p = pieces.get(id);
       const mat = print(text, label, kind, order);
-      const bodyColor = kind === "black" ? "#100d17" : kind === "gold" ? "#d6a030" : "#efe5d4";
       if (!p) {
         const group = new T.Group();
-        const body = new T.Mesh(bodyGeo, solid(bodyColor, kind === "gold" ? 0.35 : 0.72, kind === "gold" ? 0.45 : 0));
-        body.castShadow = body.receiveShadow = true;
-        group.add(body);
-
-        const face = new T.Mesh(faceGeo, mat);
-        face.receiveShadow = true;
-        group.add(face);
-
-        const reverse = new T.Mesh(backFaceGeo, reverseMat);
-        reverse.receiveShadow = true;
-        group.add(reverse);
-
+        const face = sheet(group, mat, kind === "back" ? reverseMat : kind === "black" ? promptReverseMat : reverseMat);
         scene.add(group);
-        group.position.set(x, y + (initial || reduce.matches ? 0 : 0.34), z);
-        group.rotation.set(!initial && id.startsWith("choice:") ? tilt + Math.PI * 0.76 : tilt, yaw, 0, "YXZ");
-        group.scale.set(w, w, 1);
-        p = { group, face, body, target: new T.Vector3(), scale: w, tilt, yaw };
+        const shadow = new T.Mesh(plane, shadowMatCard.clone());
+        shadow.rotation.x = FLAT;
+        shadow.renderOrder = 1;
+        scene.add(shadow);
+        const start = !initial && !reduce.matches && from ? from : undefined;
+        group.position.set(start?.x ?? x, start?.y ?? y, start?.z ?? z);
+        group.quaternion.setFromEuler(euler.set(start ? FLAT : tilt, yaw, start?.roll ?? 0));
+        p = { group, face, shadow, pos: new T.Vector3(), tilt, yaw, roll: 0, scale: 1, lift, liftTilt: 0, order, inRack: false, printKey: "" };
         pieces.set(id, p);
       }
-      p.face.material = mat;
-      p.body.material = solid(bodyColor, kind === "gold" ? 0.35 : 0.72, kind === "gold" ? 0.45 : 0);
-      p.target.set(x, y, z);
-      p.scale = w;
+      if (p.faceDown) {
+        p.roll = Math.PI;
+      } else {
+        p.face.material = mat;
+        p.printKey = printKey(text, label, kind, order);
+      }
+      p.pos.set(x, y, z);
       p.tilt = tilt;
       p.yaw = yaw;
+      p.lift = lift;
+      p.liftTilt = lift === flatLift ? 0.3 : 0;
+      p.inRack = lift === rackLift;
+      p.order = order;
       p.action = action;
       if (action) {
         p.face.userData.action = action;
@@ -526,34 +603,82 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       }
     }
 
-    card("deck", "", "", "back", DECK_X, deckTop, DECK_Z, 0.83, -Math.PI / 2, 0.19);
-    // y keeps the near (lowest) edge of the tilted body just above the tabletop
-    card("prompt", model.prompt, model.imprint, "black", 0, 0.215, -0.92, 1.62, -1.46, -0.04);
+    // A new prompt is drawn from the black deck and turned over in the middle of the table.
+    const easelAt = leanUp(EASEL.lean).multiplyScalar(CH / 2).addScaledVector(leanOut(EASEL.lean), 0.004)
+      .add(new T.Vector3(0, TOP + EASEL.seat, PROMPT_Z + EASEL.front));
+    card("prompt:" + model.prompt, model.prompt, model.imprint, "black", easelAt.x, easelAt.y, easelAt.z,
+      { tilt: FLAT + EASEL.lean, from: { x: BLACK_DECK.x, y: blackTop + 0.4, z: BLACK_DECK.z, roll: Math.PI } });
+
+    // Cards just played from the rack turn over and slide onto the pile instead of vanishing.
+    const handIds = new Set(model.zone === "hand" ? model.cards.map(c => "choice:" + c.id) : []);
+    const played = [...pieces].filter(([k, p]) => p.inRack && p.order && !p.leaving && !handIds.has(k));
+    const fresh = Array.from({ length: model.backs }, (_, i) => "back" + i).filter(k => !pieces.has(k));
+    if (!reduce.matches && played.length && fresh.length) {
+      const landing = fresh[fresh.length - 1];
+      const [[key, first], ...rest] = played;
+      pieces.delete(key);
+      pieces.set(landing, first);
+      first.faceDown = true;
+      for (const [, p] of rest) p.leaving = landing;
+    }
+
+    // Answers arrive face down in a loose pile.
     for (let i = 0; i < model.backs; i++) {
-      card("back" + i, "", "", "back", 2.34 + i * 0.045, TOP + 0.024 + i * 0.025, -0.48, 0.89, -Math.PI / 2, -0.17 + i * 0.085);
+      const j = seeded(101 + i * 13);
+      card("back" + i, "", "", "back", PILE.x + (j() - 0.5) * 0.3, LAY + i * 0.016, PILE.z + (j() - 0.5) * 0.24,
+        { yaw: (j() - 0.5) * 0.7, from: { x: PILE.x + 1.2, y: 0.9, z: PILE.z - 2.6, roll: 0 } });
     }
 
     const n = model.cards.length;
-    const gap = Math.min(1.13, 8 / Math.max(n - 1, 1));
-    model.cards.forEach((c, i) => {
-      const v = (i - (n - 1) / 2) * gap;
-      card(
-        "choice:" + c.id,
-        c.text,
-        c.label,
-        model.result ? "gold" : "white",
-        v,
-        c.order ? 0.87 : 0.50,
-        1.14 - 0.025 * v * v,
-        Math.min(gap * 0.94, 1.06),
-        -0.99,
-        -0.035 * v,
-        c.order,
-        model.canPick ? c.id : undefined,
-      );
-    });
+    if (model.zone === "hand") {
+      // The hand stands side by side in the rack; chosen cards are pulled up out of it.
+      const pitch = Math.min(CW + 0.1, (RACK.length - CW - 0.3) / Math.max(n - 1, 1));
+      const up = leanUp(RACK.lean), out = leanOut(RACK.lean);
+      model.cards.forEach((c, i) => {
+        const at = new T.Vector3((i - (n - 1) / 2) * pitch, TOP + RACK.seat, RACK_Z + RACK.front)
+          .addScaledVector(up, CH / 2 + (c.order ? 0.42 : 0)).addScaledVector(out, 0.004 + i * 0.003);
+        card("choice:" + c.id, c.text, c.label, "white", at.x, at.y, at.z, {
+          tilt: FLAT + RACK.lean, order: c.order, action: model.canPick ? c.id : undefined, lift: rackLift,
+          from: { x: WHITE_DECK.x, y: whiteTop + 0.5, z: WHITE_DECK.z, roll: Math.PI },
+        });
+      });
+    } else {
+      // Played combinations sit in a row; the one the judge inspects is lifted and tipped up to be read.
+      const pitch = Math.min(CW + 0.3, 7.6 / Math.max(n - 1, 1));
+      model.cards.forEach((c, i) => {
+        const v = (i - (n - 1) / 2) * pitch;
+        const j = seeded(31 + i * 7);
+        const yaw = (j() - 0.5) * 0.08;
+        const extra = Math.max(0, (c.count ?? 1) - 1);
+        const kind = model.result ? "gold" : "white";
+        const reveal = { x: v, y: model.result ? 1.2 : 0.5, z: CENTER_Z - 0.3, roll: Math.PI };
+        for (let k = extra; k >= 1; k--) {
+          card(`choice:${c.id}:${k}`, "", c.label, kind, v + 0.07 * k, LAY + (extra - k) * 0.016, CENTER_Z - 0.06 * k,
+            { yaw: yaw + 0.07 * k, from: reveal });
+        }
+        // The judge's pick and the winning cards are lifted and tipped up toward the viewer.
+        const picked = Boolean(c.order) || model.result;
+        card("choice:" + c.id, c.text, c.label, kind, v, picked ? 1.05 : LAY + extra * 0.016,
+          picked ? CENTER_Z + 0.75 : CENTER_Z, {
+            tilt: picked ? FLAT + 0.6 : FLAT, yaw: picked ? 0 : yaw, order: c.order,
+            action: model.canPick ? c.id : undefined, from: reveal,
+          });
+      });
+    }
 
-    for (const [k, p] of pieces) if (!live.has(k)) { scene.remove(p.group); pieces.delete(k); }
+    for (const [k, p] of pieces) {
+      if (live.has(k)) continue;
+      const landing = p.leaving && pieces.get(p.leaving);
+      if (landing && !reduce.matches) {
+        p.pos.copy(landing.pos).y += 0.012;
+        p.tilt = landing.tilt;
+        p.yaw = landing.yaw;
+        p.roll = Math.PI;
+        p.action = undefined;
+        delete p.face.userData.action;
+      } else drop(k, p);
+    }
+    for (const p of pieces.values()) if (p.faceDown || p.leaving) used.add(p.printKey);
     for (const [k, art] of covers) if (!used.has(k)) { art.texture.dispose(); art.mat.dispose(); covers.delete(k); }
     if (hovered && !hittable.some(h => h.userData.action === hovered)) hovered = undefined;
     initial = false;
@@ -561,35 +686,168 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   }
 
   const ray = new T.Raycaster();
+  const ndc = new T.Vector2();
   function hit(event: MouseEvent) {
-    const r = canvas.getBoundingClientRect();
-    ray.setFromCamera(new T.Vector2(((event.clientX - r.left) / r.width) * 2 - 1, 1 - ((event.clientY - r.top) / r.height) * 2), camera);
+    const rect = canvas.getBoundingClientRect();
+    ray.setFromCamera(ndc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, 1 - ((event.clientY - rect.top) / rect.height) * 2), camera);
     return ray.intersectObjects(hittable, false)[0]?.object.userData.action as string | undefined;
   }
-  function click(e: MouseEvent) { const id = hit(e); if (id) pick(id); }
-  function pointer(e: PointerEvent) {
+
+  // Points on the plane at the focus height, seen from where the camera is heading (not where it is
+  // mid-glide), so zooming about the pointer and dragging stay stable during camera transitions.
+  const ground = new T.Plane(new T.Vector3(0, 1, 0), -frameTarget.y);
+  const aimCam = new T.PerspectiveCamera();
+  const anchor = new T.Vector3(), from = new T.Vector3(), to = new T.Vector3();
+  function groundAt(clientX: number, clientY: number, out: T.Vector3) {
+    const rect = canvas.getBoundingClientRect();
+    aimCam.copy(camera, false);
+    aimCam.position.copy(camGoal);
+    aimCam.lookAt(lookGoal);
+    aimCam.updateMatrixWorld();
+    ray.setFromCamera(ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, 1 - ((clientY - rect.top) / rect.height) * 2), aimCam);
+    return ray.ray.intersectPlane(ground, out);
+  }
+
+  function zoomTo(next: number, clientX?: number, clientY?: number) {
+    next = T.MathUtils.clamp(next, 1, MAX_ZOOM);
+    if (!camReady || Math.abs(next - zoom) < 0.0005) return;
+    if (clientX !== undefined && clientY !== undefined && groundAt(clientX, clientY, anchor)) {
+      // Scaling the view about the point under the pointer keeps that point where it is on screen.
+      const f = zoom / next;
+      pan.x = anchor.x + (frameTarget.x + pan.x - anchor.x) * f - frameTarget.x;
+      pan.z = anchor.z + (frameTarget.z + pan.z - anchor.z) * f - frameTarget.z;
+    }
+    zoom = next;
+    aim(false);
+    options.onZoom?.(zoom);
+  }
+
+  const touches = new Map<number, { x: number; y: number }>();
+  let drag: { x: number; y: number; startX: number; startY: number; moved: boolean } | undefined;
+  let pinch = 0, suppressClick = false;
+  function spread() {
+    const [a, b] = [...touches.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  }
+  function centre() {
+    const [a, b] = [...touches.values()];
+    return { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 };
+  }
+  function cursor(id?: string) {
+    canvas.style.cursor = drag?.moved ? "grabbing" : id ? "pointer" : options.zoomable && zoom > 1.001 ? "grab" : "";
+  }
+
+  function down(e: PointerEvent) {
+    if (!options.zoomable || (e.pointerType === "mouse" && e.button !== 0)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 1) {
+      suppressClick = false;
+      drag = { x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, moved: false };
+    } else if (touches.size === 2) {
+      pinch = spread();
+      drag = undefined;
+    }
+  }
+  function move(e: PointerEvent) {
+    const point = touches.get(e.pointerId);
+    if (point) { point.x = e.clientX; point.y = e.clientY; }
+    if (touches.size === 2) {
+      const now = spread(), mid = centre();
+      if (pinch > 0 && now > 0) zoomTo(zoom * now / pinch, mid.x, mid.y);
+      pinch = now;
+      suppressClick = true;
+      return;
+    }
+    if (drag && point) {
+      if (!drag.moved && zoom > 1.001 && Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 6) {
+        drag.moved = true;
+        canvas.setPointerCapture(e.pointerId);
+        if (hovered) { hovered = undefined; invalidate(); }
+      }
+      if (drag.moved) {
+        if (groundAt(drag.x, drag.y, from) && groundAt(e.clientX, e.clientY, to)) {
+          pan.x += from.x - to.x;
+          pan.z += from.z - to.z;
+          aim(true);
+        }
+        drag.x = e.clientX;
+        drag.y = e.clientY;
+        cursor();
+        return;
+      }
+    }
     const id = hittable.length && e.pointerType !== "touch" ? hit(e) : undefined;
-    canvas.style.cursor = id ? "pointer" : "";
+    cursor(id);
     if (id !== hovered) { hovered = id; invalidate(); }
   }
-  function leave() { if (hovered) { hovered = undefined; canvas.style.cursor = ""; invalidate(); } }
+  function up(e: PointerEvent) {
+    touches.delete(e.pointerId);
+    if (drag?.moved) suppressClick = true;
+    if (touches.size < 2) pinch = 0;
+    if (touches.size === 0) drag = undefined;
+    cursor();
+  }
+  function click(e: MouseEvent) {
+    if (suppressClick) { suppressClick = false; return; }
+    const id = hit(e);
+    if (id) pick(id);
+  }
+  function leave() { if (hovered) { hovered = undefined; invalidate(); } cursor(); }
+  function wheel(e: WheelEvent) {
+    if (!options.zoomable) return;
+    // Trackpad pinch arrives as ctrl + wheel in Chromium and Firefox.
+    if (!e.ctrlKey && !e.metaKey) { options.onWheelHint?.(); return; }
+    e.preventDefault();
+    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+    zoomTo(zoom * Math.exp(-T.MathUtils.clamp(delta, -120, 120) * 0.0025), e.clientX, e.clientY);
+  }
+  // Safari reports trackpad pinch as gesture events. During a touch pinch the pointers already zoom.
+  let gestureBase = 1;
+  function gestureStart(e: Event) {
+    if (!options.zoomable) return;
+    e.preventDefault();
+    gestureBase = zoom;
+  }
+  function gestureChange(e: Event) {
+    if (!options.zoomable) return;
+    e.preventDefault();
+    const g = e as Event & { scale?: number; clientX?: number; clientY?: number };
+    if (touches.size === 0 && g.scale) zoomTo(gestureBase * g.scale, g.clientX, g.clientY);
+  }
 
-  canvas.addEventListener("click", click);
-  canvas.addEventListener("pointermove", pointer);
-  canvas.addEventListener("pointerleave", leave);
+  const listeners: [string, EventListener, AddEventListenerOptions?][] = [
+    ["click", click as EventListener], ["pointerdown", down as EventListener], ["pointermove", move as EventListener],
+    ["pointerup", up as EventListener], ["pointercancel", up as EventListener], ["pointerleave", leave],
+    ["wheel", wheel as EventListener, { passive: false }],
+    ["gesturestart", gestureStart, { passive: false }], ["gesturechange", gestureChange, { passive: false }],
+  ];
+  for (const [type, fn, opts] of listeners) canvas.addEventListener(type, fn, opts);
   resize(true);
 
   return {
     update,
-    setOverhead(value: boolean) { overhead = value; resize(false); },
+    setOverhead(value: boolean) {
+      overhead = value;
+      zoom = 1;
+      pan.set(0, 0, 0);
+      resize(false);
+      options.onZoom?.(zoom);
+    },
+    /** Zoom about the middle of the current view; buttons for people who do not use gestures. */
+    zoomBy(factor: number) { zoomTo(zoom * factor); },
+    resetZoom() {
+      zoom = 1;
+      pan.set(0, 0, 0);
+      aim(false);
+      options.onZoom?.(zoom);
+    },
     dispose() {
       disposed = true;
       cancelAnimationFrame(frame);
       observer.disconnect();
-      canvas.removeEventListener("click", click);
-      canvas.removeEventListener("pointermove", pointer);
-      canvas.removeEventListener("pointerleave", leave);
+      for (const [type, fn] of listeners) canvas.removeEventListener(type, fn);
       clearSeats();
+      pieces.forEach(p => (p.shadow.material as T.Material).dispose());
       covers.forEach(c => { c.texture.dispose(); c.mat.dispose(); });
       geometries.forEach(g => g.dispose());
       materials.forEach(m => m.dispose());

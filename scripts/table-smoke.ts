@@ -40,6 +40,32 @@ try {
     await page.getByRole("button", { name: "Salvar", exact: true }).click();
     await page.getByRole("button", { name: "Começar a partida" }).click();
     await page.getByRole("heading", { name: "Escolha a vencedora" }).waitFor();
+    // Zoom: Ctrl + wheel about the pointer, dragging pans without picking, buttons and reset.
+    const zoomOut = page.getByRole("button", { name: "Afastar" });
+    const zoomIn = page.getByRole("button", { name: "Aproximar" });
+    assert(await zoomOut.isDisabled());
+    const stage = page.locator(".stage-ready canvas");
+    await stage.scrollIntoViewIfNeeded();
+    const area = (await stage.boundingBox())!;
+    const [cx, cy] = [area.x + area.width / 2, area.y + area.height * .6];
+    await page.mouse.move(cx, cy);
+    await page.mouse.wheel(0, -300);
+    await page.locator(".stage-hint").waitFor();
+    assert(await zoomOut.isDisabled());
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -300);
+    await page.keyboard.up("Control");
+    await page.waitForFunction(() => !(document.querySelector('[aria-label="Afastar"]') as HTMLButtonElement).disabled);
+    await page.mouse.down();
+    await page.mouse.move(cx + 90, cy - 40, { steps: 6 });
+    await page.mouse.up();
+    assert.equal(await page.locator(".answer-group.selected").count(), 0);
+    await page.getByRole("button", { name: "Ver a mesa inteira" }).click();
+    assert(await zoomOut.isDisabled());
+    await zoomIn.click();
+    assert(await zoomOut.isEnabled());
+    await zoomOut.click();
+    assert(await zoomOut.isDisabled());
     const camera = page.getByRole("button", { name: "Vista de cima" });
     await camera.click();
     assert.equal(await camera.getAttribute("aria-pressed"), "true");
@@ -62,6 +88,6 @@ try {
     await page.getByRole("button", { name: "Enviar resposta" }).click();
     await page.getByRole("heading", { name: "Julgamento", exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.info("Mesa 3D OK: seleção de combinação e carta por raycast, câmeras, resultado e envio após perda de WebGL.");
+    console.info("Mesa 3D OK: zoom (Ctrl + rolagem, arrasto, botões), seleção de combinação e carta por raycast, câmeras, resultado e envio após perda de WebGL.");
   } finally { await browser.close(); }
 } finally { await app.stop(); }

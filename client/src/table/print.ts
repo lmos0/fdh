@@ -1,6 +1,8 @@
 import { CanvasTexture, SRGBColorSpace } from "three";
 
-const W = 768, H = 960, PAD = 58;
+const W = 720, H = 1008, PAD = 56, CORNER = 34;
+/** Cards follow the 5:7 ratio of real playing cards (63 × 88 mm). */
+export const CARD_ASPECT = W / H;
 const SANS = `"Helvetica Neue", Helvetica, Arial, sans-serif`;
 const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
 
@@ -30,12 +32,18 @@ function hash(text: string) {
   return (Math.abs(h) % 2147483646) + 1;
 }
 
-/** High-resolution letterpress-style card art with realistic cardstock patina and crisp typography. */
-export function cardPrint(text: string, label: string, kind: "black" | "white" | "back" | "gold", order = 0) {
+export type PrintKind = "black" | "white" | "back" | "promptBack" | "gold";
+
+/** High-resolution letterpress-style card art. Corners outside the die-cut stay transparent (alphaTest). */
+export function cardPrint(text: string, label: string, kind: PrintKind, order = 0) {
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
   const g = canvas.getContext("2d")!;
+  rounded(g, 0, 0, W, H, CORNER);
+  g.clip();
+  const promptBack = kind === "promptBack";
+  if (promptBack) kind = "back";
   const dark = kind === "black" || kind === "back";
   const ink = kind === "black" ? "#ffffff" : kind === "gold" ? "#1e1002" : "#0b0714";
   const spot = kind === "gold" ? "#6e4000" : kind === "black" ? "#ff72ba" : "#a80d56";
@@ -70,9 +78,9 @@ export function cardPrint(text: string, label: string, kind: "black" | "white" |
     g.fillRect(0, 0, W, H);
   } else if (kind === "back") {
     const bg = g.createRadialGradient(W * 0.5, H * 0.44, 60, W * 0.5, H * 0.5, H * 0.76);
-    bg.addColorStop(0, "#c81967");
-    bg.addColorStop(0.68, "#a61053");
-    bg.addColorStop(1, "#7b093c");
+    bg.addColorStop(0, promptBack ? "#2a2236" : "#c81967");
+    bg.addColorStop(0.68, promptBack ? "#1a1524" : "#a61053");
+    bg.addColorStop(1, promptBack ? "#100c17" : "#7b093c");
     g.fillStyle = bg;
     g.fillRect(0, 0, W, H);
   } else {
@@ -212,7 +220,7 @@ export function cardPrint(text: string, label: string, kind: "black" | "white" |
 
     // Main card text — crisp high-contrast heavy letterpress typography
     const max = W - PAD * 2;
-    const maxHeight = 620;
+    const maxHeight = 680;
     let size = kind === "black" ? 86 : 102;
     let lines: string[] = [];
     for (; size >= 26; size -= 3) {

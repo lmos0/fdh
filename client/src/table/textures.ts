@@ -17,6 +17,7 @@ export interface TextureBundle {
   fabricBump: T.CanvasTexture;
   foam: { map: T.CanvasTexture; bump: T.CanvasTexture };
   shadowBlob: T.CanvasTexture;
+  cardShadow: T.CanvasTexture;
 }
 
 /** Deterministic PRNG so procedural surfaces never shimmer or change between visits. */
@@ -277,7 +278,7 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         }
       }
     }
-  }, true, [16, 16]);
+  }, true, [14, 14]);
 
   const tilesBump = make(512, 512, g => {
     g.fillStyle = "#222222";
@@ -295,7 +296,7 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fill();
       }
     }
-  }, false, [16, 16]);
+  }, false, [14, 14]);
 
   const tilesRough = make(512, 512, g => {
     const rand = seeded(19);
@@ -312,7 +313,7 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fill();
       }
     }
-  }, false, [16, 16]);
+  }, false, [14, 14]);
 
   // --- 4. Woven Kilim Rug (Albedo + Bump)
   const rugMap = make(512, 320, g => {
@@ -422,7 +423,7 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fillRect(x, y + 2, 2, 2);
       }
     }
-  }, false, [5, 6.25]);
+  }, false, [5, 7]);
 
   const linenRough = make(256, 256, g => {
     g.fillStyle = "rgb(220,220,220)";
@@ -434,7 +435,7 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fillRect(x, y, 2, 2);
       }
     }
-  }, false, [5, 6.25]);
+  }, false, [5, 7]);
 
   // --- 7. Striated Card Deck Side Texture (shows crisp stacked ivory cardstock sheets)
   const deckEdge = make(64, 256, g => {
@@ -672,7 +673,20 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     g.fillRect(0, 0, 128, 128);
   }, false);
 
+  // --- 15. Soft rounded-rectangle contact shadow under each card (shadowBlur works in every engine;
+  // ctx.filter does not exist in older WebKit). The shape is drawn off-canvas so only its blur remains.
+  const cardShadow = make(128, 160, g => {
+    g.shadowColor = "rgba(16,8,4,0.9)";
+    g.shadowBlur = 11;
+    g.shadowOffsetX = 1000;
+    g.fillStyle = "#000";
+    g.beginPath();
+    g.roundRect(-1000 + 16, 16, 96, 128, 8);
+    g.fill();
+  }, false);
+
   return {
+    cardShadow,
     wood: { map: woodMap, bump: woodBump, rough: woodRough },
     mahogany: { map: mahoganyMap, bump: mahoganyBump },
     tiles: { map: tilesMap, bump: tilesBump, rough: tilesRough },

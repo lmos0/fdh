@@ -1,12 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Settings, Snapshot } from "../../../shared/protocol";
 import { PlayerList } from "../components/PlayerList";
-import { PHASE_TIME_LIMITS, RESULT_INTERVALS } from "../../../shared/protocol";
+import { HAND_SIZE, HISTORY_LIMIT, MAX_PLAYERS, MIN_PLAYERS, PHASE_TIME_LIMITS, RESULT_INTERVALS, TARGET_SCORE_RANGE } from "../../../shared/protocol";
 import { CardFace } from "../components/CardFace";
 import { TableStage } from "../table/TableStage";
 import { tableModel } from "../table/model";
-
-const MIN_PLAYERS = 3;
 
 export function LobbyScreen({ snapshot, disabled, configure, start, copyInvite, copied }: {
   snapshot: Snapshot; disabled: boolean; configure: (settings: Settings) => void; start: () => void;
@@ -50,7 +48,7 @@ export function LobbyScreen({ snapshot, disabled, configure, start, copyInvite, 
                 <option value="manual">Anfitrião avança manualmente</option>
               </select></div>
             <div className="field"><label htmlFor="target-score">Pontos para vencer</label>
-              <div className="inline-fields"><input id="target-score" type="number" inputMode="numeric" enterKeyHint="done" min={3} max={20} step={1} required
+              <div className="inline-fields"><input id="target-score" type="number" inputMode="numeric" enterKeyHint="done" min={TARGET_SCORE_RANGE.min} max={TARGET_SCORE_RANGE.max} step={1} required
                 value={targetScore} onChange={event => setTargetScore(event.target.value)} disabled={disabled} />
                 <button className="button secondary" disabled={disabled || unchanged}>Salvar</button></div></div>
           </div>
@@ -70,15 +68,15 @@ export function LobbyScreen({ snapshot, disabled, configure, start, copyInvite, 
       </div>}
       <details className="rules-summary">
         <summary>Regras</summary>
-        <ul><li>Cada pessoa começa com 7 cartas de resposta.</li><li>A pergunta indica se você escolhe 1, 2 ou 3 cartas.</li><li>DRAW 2 dá 2 cartas extras antes da escolha.</li><li>O juiz escolhe a melhor combinação sem ver o autor.</li><li>O vencedor ganha 1 ponto e o juiz muda.</li><li>Quem chegar a {room.settings.targetScore} pontos vence.</li></ul>
+        <ul><li>Cada pessoa começa com {HAND_SIZE} cartas de resposta.</li><li>A pergunta indica se você escolhe 1, 2 ou 3 cartas.</li><li>DRAW 2 dá 2 cartas extras antes da escolha.</li><li>O juiz escolhe a melhor combinação sem ver o autor.</li><li>O vencedor ganha 1 ponto e o juiz muda.</li><li>Quem chegar a {room.settings.targetScore} pontos vence.</li></ul>
         <ul><li>O limite vale separadamente para responder e julgar. Sem limite, a fase aguarda todos.</li>
           <li>No fim do prazo, respostas ausentes ficam de fora. Se ninguém respondeu ou o juiz não escolher, a rodada é cancelada sem pontos e o juiz muda.</li>
           <li>Qualquer participante pode pausar ou retomar para o grupo. Desconexões também congelam os prazos; retomar não remove a pausa por desconexão.</li></ul>
-        <p>O anfitrião pode avançar o resultado antes do intervalo ou escolher avanço apenas manual. As últimas 30 combinações vencedoras ficam no histórico da partida.</p>
+        <p>O anfitrião pode avançar o resultado antes do intervalo ou escolher avanço apenas manual. As últimas {HISTORY_LIMIT} combinações vencedoras ficam no histórico da partida.</p>
       </details>
     </section>
     <aside><TableStage model={tableModel(snapshot)} title="Lugares à mesa" />
-    <div className="panel roster-panel"><div className="section-heading"><h2>Jogadores</h2><span className="count-pill">{room.players.length}/8</span></div>
+    <div className="panel roster-panel"><div className="section-heading"><h2>Jogadores</h2><span className="count-pill">{room.players.length}/{MAX_PLAYERS}</span></div>
       <PlayerList players={room.players} selfId={self.playerId} hostId={room.hostPlayerId} />
       {missing > 0 && <ul className="empty-seats" aria-hidden="true">{Array.from({ length: missing }, (_, index) => <li key={index}><span className="seat-mark">+</span>Aguardando jogador…</li>)}</ul>}
     </div></aside>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { Snapshot } from "../../../shared/protocol";
+import { MIN_PLAYERS, type Snapshot } from "../../../shared/protocol";
 import { Hand } from "../components/Hand";
 import { AnswerOptions, ResponseList } from "../components/AnswerOptions";
 import { PlayerList } from "../components/PlayerList";
@@ -15,12 +15,19 @@ import { ResultParticles } from "../components/ResultParticles";
 import { TableStage } from "../table/TableStage";
 import { tableModel } from "../table/model";
 
+const SCROLL_MARGIN_PX = 32;
+
 /** Uma carta virada por resposta esperada: mostra o andamento sem revelar quem enviou. */
 function SubmissionProgress({ received, expected }: { received: number; expected: number }) {
   return <div className="submission-progress" role="img" aria-label={`${received} de ${expected} respostas recebidas`}>
     {Array.from({ length: expected }, (_, index) => <span key={index} className={`card-back ${index < received ? "received" : ""}`}>
       {index < received && <CardFace mischievous />}</span>)}
   </div>;
+}
+
+function handHeading(isJudge: boolean, submitted: boolean): string {
+  if (isJudge) return "Aguarde as respostas para escolher a vencedora";
+  return submitted ? "Resposta enviada" : "Sua mão";
 }
 
 export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, advance, restart, revealRoundId }: {
@@ -43,14 +50,13 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   const resultAnchor = useRef<HTMLElement>(null);
   const finished = room.phase === "finished";
   useEffect(() => {
-    if (round?.result?.roundId && round.result.roundId === revealRoundId) {
-      // Quando couber, a pergunta preenchida aparece junto com a combinação vencedora.
-      const result = resultAnchor.current;
-      const prompt = finished ? null : layout.current?.querySelector(".prompt-stack");
-      const together = result && prompt && prompt.getBoundingClientRect().top <= result.getBoundingClientRect().top
-        && result.getBoundingClientRect().bottom - prompt.getBoundingClientRect().top <= window.innerHeight - 32;
-      (together ? prompt : result)?.scrollIntoView({ block: "start", behavior: "auto" });
-    }
+    if (!round?.result?.roundId || round.result.roundId !== revealRoundId) return;
+    // Quando couber, a pergunta preenchida aparece junto com a combinação vencedora.
+    const result = resultAnchor.current;
+    const prompt = finished ? null : layout.current?.querySelector(".prompt-stack");
+    const together = result && prompt && prompt.getBoundingClientRect().top <= result.getBoundingClientRect().top
+      && result.getBoundingClientRect().bottom - prompt.getBoundingClientRect().top <= window.innerHeight - SCROLL_MARGIN_PX;
+    (together ? prompt : result)?.scrollIntoView({ block: "start", behavior: "auto" });
   }, [round?.result?.roundId, revealRoundId]);
   useEffect(() => {
     setSelection(emptySelection(round?.prompt.pick ?? 1));
@@ -76,7 +82,8 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   const isHost = room.hostPlayerId === self.playerId;
   const hostName = room.players.find(player => player.id === room.hostPlayerId)?.nickname ?? "o anfitrião";
   const connectedCount = room.players.filter(player => player.connected).length;
-  const canRestartNow = room.players.length >= 3 && connectedCount === room.players.length;
+  const hasEnoughPlayers = room.players.length >= MIN_PLAYERS;
+  const canRestartNow = hasEnoughPlayers && connectedCount === room.players.length;
   const judgeName = room.players.find(player => player.id === round?.judgePlayerId)?.nickname ?? "O juiz";
   const locked = disabled || room.paused;
   const result = round?.result;
@@ -123,11 +130,11 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
         <div className="final-actions">
           {isHost ? <>
             <div className="final-action-buttons">
-              {room.players.length >= 3 && <button className="button primary" onClick={() => restart(false)} disabled={disabled || !canRestartNow}>Jogar novamente</button>}
-              <button className={`button ${room.players.length >= 3 ? "secondary" : "primary"}`} onClick={() => restart(true)} disabled={disabled}>Voltar à sala de espera</button>
+              {hasEnoughPlayers && <button className="button primary" onClick={() => restart(false)} disabled={disabled || !canRestartNow}>Jogar novamente</button>}
+              <button className={`button ${hasEnoughPlayers ? "secondary" : "primary"}`} onClick={() => restart(true)} disabled={disabled}>Voltar à sala de espera</button>
               <button className="button ghost" onClick={leave} disabled={disabled}>Voltar para o início</button>
             </div>
-            <p className="fine-print">{room.players.length < 3
+            <p className="fine-print">{!hasEnoughPlayers
               ? "Volte à sala de espera para aguardar mais participantes usando o mesmo código."
               : !canRestartNow ? "Aguardando todos reconectarem para jogar novamente, ou volte à sala de espera."
               : "Reinicia a partida nesta mesma sala, mantendo o código e os participantes."}</p>
@@ -139,7 +146,7 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
       </section>}
       {round && <>
         {room.phase === "submitting" && <section className="play-section" aria-labelledby="hand-heading">
-          <div className="section-heading"><h2 id="hand-heading" tabIndex={-1}>{isJudge ? "Aguarde as respostas para escolher a vencedora" : self.submitted ? "Resposta enviada" : "Sua mão"}</h2>
+          <div className="section-heading"><h2 id="hand-heading" tabIndex={-1}>{handHeading(isJudge, self.submitted)}</h2>
             <span className="count-pill" aria-live="polite">{round.receivedCount}/{round.expectedCount} respostas</span></div>
           {isJudge ? <div className="panel waiting-panel"><SubmissionProgress received={round.receivedCount} expected={round.expectedCount} />
             <p>As respostas chegam viradas para baixo. Você só vê as combinações quando todos enviarem ou o prazo acabar.</p></div>

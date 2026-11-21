@@ -8,6 +8,7 @@ import { ThemeToggle } from "../components/ThemeToggle";
 import { SoundControls } from "../components/SoundControls";
 
 const PAGE_SIZE = 24;
+const CATALOG_TIMEOUT_MS = 20_000;
 const normalize = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("pt-BR");
 
 export function CardsPage() {
@@ -29,7 +30,7 @@ export function CardsPage() {
     const startedAt = performance.now();
     logger.debug("catalog.requested", { attempt: attempt + 1 });
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
+    const timeout = setTimeout(() => controller.abort(), CATALOG_TIMEOUT_MS);
     let active = true;
     setError(null);
     void fetch("/api/cards", { signal: controller.signal }).then(async response => {

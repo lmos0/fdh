@@ -1,8 +1,34 @@
-import type { Snapshot } from "../../../shared/protocol";
-import { CardFace } from "./CardFace";
+import { RECONNECT_GRACE_SECONDS, type GamePhase, type Snapshot } from "../../../shared/protocol";
+import { CardFace, type Mood } from "./CardFace";
 import { FilledPrompt } from "./FilledPrompt";
 import { JudgeIcon } from "./JudgeIcon";
 import { PhaseClock } from "./PhaseClock";
+
+// O lobby nunca chega aqui; seus valores apenas mantêm as tabelas completas.
+const PHASE_TITLES = {
+  lobby: "Resultado", submitting: "Respostas", judging: "Julgamento", round_result: "Resultado", finished: "Fim de jogo",
+} as const satisfies Record<GamePhase, string>;
+const PHASE_STEPS = {
+  lobby: 2, submitting: 0, judging: 1, round_result: 2, finished: 2,
+} as const satisfies Record<GamePhase, number>;
+const PHASE_EXPRESSIONS = {
+  lobby: "mischievous", submitting: "thinking", judging: "suspicious", round_result: "mischievous", finished: "mischievous",
+} as const satisfies Record<GamePhase, Mood>;
+
+function submittingInstruction(isJudge: boolean, submitted: boolean, pick: number | undefined): string {
+  if (isJudge) return "Aguarde as respostas";
+  if (submitted) return "Resposta enviada. Aguarde o julgamento.";
+  return `Escolha ${pick} ${pick === 1 ? "carta" : "cartas"}`;
+}
+
+function roundInstruction(snapshot: Snapshot, isJudge: boolean, judgeName: string): string {
+  const { room, self } = snapshot;
+  if (room.phase === "finished") return "Partida encerrada";
+  if (room.paused) return "Partida pausada · tempo congelado";
+  if (room.phase === "submitting") return submittingInstruction(isJudge, self.submitted, room.round?.prompt.pick);
+  if (room.phase === "judging") return isJudge ? "Sua vez de julgar" : `Aguarde a escolha de ${judgeName}`;
+  return "A combinação vencedora";
+}
 
 export function RoundTable({ snapshot, disabled, pause, answers }: {
   snapshot: Snapshot; disabled: boolean; pause: (roundId: string, paused: boolean) => void;
@@ -14,16 +40,11 @@ export function RoundTable({ snapshot, disabled, pause, answers }: {
   const finished = room.phase === "finished";
   const isJudge = round?.judgePlayerId === self.playerId;
   const judgeName = room.players.find(player => player.id === round?.judgePlayerId)?.nickname ?? "O juiz";
-  const phaseTitle = finished ? "Fim de jogo" : room.phase === "submitting" ? "Respostas" : room.phase === "judging" ? "Julgamento" : "Resultado";
-  const step = room.phase === "submitting" ? 0 : room.phase === "judging" ? 1 : 2;
-  const instruction = finished ? "Partida encerrada" : room.paused ? "Partida pausada · tempo congelado"
-    : room.phase === "submitting" ? isJudge ? "Aguarde as respostas" : self.submitted ? "Resposta enviada. Aguarde o julgamento."
-      : `Escolha ${round?.prompt.pick} ${round?.prompt.pick === 1 ? "carta" : "cartas"}`
-    : room.phase === "judging" ? isJudge ? "Sua vez de julgar" : `Aguarde a escolha de ${judgeName}`
-    : "A combinação vencedora";
-  const expression = room.players.some(player => !player.connected) ? "sleepy"
-    : room.phase === "judging" ? "suspicious" : room.phase === "submitting" ? "thinking" : "mischievous";
+  const phaseTitle = PHASE_TITLES[room.phase];
+  const step = PHASE_STEPS[room.phase];
+  const instruction = roundInstruction(snapshot, isJudge, judgeName);
   const offline = room.players.filter(player => !player.connected);
+  const expression: Mood = offline.length ? "sleepy" : PHASE_EXPRESSIONS[room.phase];
   // Enquanto a pessoa escolhe, a quantidade já aparece na pergunta e na barra de envio.
   const choosing = room.phase === "submitting" && !isJudge && !self.submitted && !room.paused;
 
@@ -44,7 +65,7 @@ export function RoundTable({ snapshot, disabled, pause, answers }: {
     </ol>}
     {!finished && <div className="game-tools"><PhaseClock snapshot={snapshot} /></div>}
     {room.collectivelyPaused && !finished && <div className="banner info" role="status">Pausa coletiva. Qualquer participante pode retomar. Os prazos estão congelados.</div>}
-    {room.paused && offline.length > 0 && <div className="banner warning" role="status">Partida pausada. Aguardando {offline.map(player => player.nickname).join(", ")} reconectar, por até 60 segundos.</div>}
+    {room.paused && offline.length > 0 && <div className="banner warning" role="status">Partida pausada. Aguardando {offline.map(player => player.nickname).join(", ")} reconectar, por até {RECONNECT_GRACE_SECONDS} segundos.</div>}
     {round && <>
       {!finished && <div className={`round-judge ${isJudge ? "is-self" : ""}`} role="status" aria-label="Juiz da rodada" aria-atomic="true">
         <span className="round-judge-icon"><JudgeIcon /></span>

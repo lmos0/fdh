@@ -1,14 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type {
-  CommandPayloads, CommandSuccess, CommandType, ErrorCode, FeatureFlags, ServerEvent, SessionCredential, Snapshot,
+import {
+  NICKNAME_LENGTH, TARGET_SCORE_RANGE,
+  type CommandPayloads, type CommandSuccess, type CommandType, type ErrorCode, type FeatureFlags,
+  type ServerEvent, type SessionCredential, type Snapshot,
 } from "../../../shared/protocol";
 import { logger } from "./logger";
-import { createGameSoundTracker } from "../audio/state";
+import { createGameSoundTracker, type SoundName } from "../audio/state";
 import { playSound, stopSounds } from "../audio/player";
 
 // Preservar a chave mantém sessões existentes após a mudança de nome do jogo.
 const SESSION_KEY = "de-proposito.session.v1";
-type Status = "connecting" | "connected" | "reconnecting" | "replaced";
+const COMMAND_TIMEOUT_MS = 12_000;
+const RECONNECT_BASE_DELAY_MS = 700;
+const RECONNECT_MAX_DELAY_MS = 10_000;
+const RECONNECT_MAX_EXPONENT = 5;
+/** Variação de ±20% no atraso evita que todos os clientes reconectem no mesmo instante. */
+const RECONNECT_JITTER = 0.4;
+/** Erros após os quais a sessão salva não serve mais: voltar à tela inicial. */
+const TERMINAL_ERROR_CODES: ReadonlySet<ErrorCode> = new Set(["ROOM_NOT_FOUND", "SESSION_INVALID", "SESSION_EXPIRED", "NOT_IN_ROOM"]);
+const REVEAL_SOUNDS: ReadonlySet<SoundName> = new Set(["result", "point", "victory", "judge_confirm", "ending", "judge_ending"]);
+
+export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "replaced";
+type ServerEventOf<K extends ServerEvent["type"]> = Extract<ServerEvent, { type: K }>;
 interface Pending {
   command: CommandType;
   startedAt: number;
@@ -20,8 +33,8 @@ interface Pending {
 const errors: Record<ErrorCode, string> = {
   INVALID_MESSAGE: "A mensagem não pôde ser entendida.",
   UNSUPPORTED_EVENT: "Esta ação não é suportada. Atualize a página.",
-  INVALID_NICKNAME: "Use um apelido de 2 a 24 caracteres, sem caracteres especiais de controle.",
-  INVALID_SETTINGS: "Use uma pontuação inteira de 3 a 20 e os intervalos disponíveis no lobby.",
+  INVALID_NICKNAME: `Use um apelido de ${NICKNAME_LENGTH.min} a ${NICKNAME_LENGTH.max} caracteres, sem caracteres especiais de controle.`,
+  INVALID_SETTINGS: `Use uma pontuação inteira de ${TARGET_SCORE_RANGE.min} a ${TARGET_SCORE_RANGE.max} e os intervalos disponíveis no lobby.`,
   ALREADY_IN_ROOM: "Você já está em uma sala. Saia dela antes de entrar em outra.",
   SERVER_FULL: "O servidor está cheio. Tente novamente daqui a pouco.",
   ROOM_NOT_FOUND: "A sala não existe mais ou o código está incorreto.",
@@ -54,15 +67,25 @@ const errors: Record<ErrorCode, string> = {
   INTERNAL_ERROR: "Ocorreu um erro ao concluir a ação. Tente novamente.",
 };
 
+function isSessionCredential(value: unknown): value is SessionCredential {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.token === "string" && typeof candidate.roomCode === "string" && typeof candidate.playerId === "string";
+}
+
 function readSession(): SessionCredential | null {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? "null");
-    if (value && typeof value === "object" && "token" in value && "roomCode" in value && "playerId" in value &&
-        typeof value.token === "string" && typeof value.roomCode === "string" && typeof value.playerId === "string") {
-      return value as SessionCredential;
-    }
-  } catch { logger.warn("session.storage_unavailable", { reason: "read_failed" }); }
-  return null;
+    return isSessionCredential(value) ? value : null;
+  } catch {
+    logger.warn("session.storage_unavailable", { reason: "read_failed" });
+    return null;
+  }
+}
+
+function reconnectDelay(attempt: number): number {
+  const base = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.min(attempt, RECONNECT_MAX_EXPONENT));
+  return base * (1 - RECONNECT_JITTER / 2 + Math.random() * RECONNECT_JITTER);
 }
 
 function storeSession(value: SessionCredential | null): void {
@@ -75,7 +98,7 @@ function storeSession(value: SessionCredential | null): void {
 export function useGameConnection() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [revealRoundId, setRevealRoundId] = useState<string | null>(null);
-  const [status, setStatus] = useState<Status>("connecting");
+  const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [features, setFeatures] = useState<FeatureFlags>({ botTestMode: false });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -120,7 +143,7 @@ export function useGameConnection() {
         reject(new Error("Confirmação não recebida."));
         // Reabrir a conexão recupera o snapshot e evita continuar numa sessão incerta.
         socket.close();
-      }, 12_000);
+      }, COMMAND_TIMEOUT_MS);
       pending.current.set(requestId, { resolve, reject, timer, command: type, startedAt });
       setPendingCount(pending.current.size);
       logger.debug("command.sent", { requestId, command: type, roomCode: sessionRef.current?.roomCode });
@@ -146,6 +169,113 @@ export function useGameConnection() {
       if (!disposed) setPendingCount(0);
     }
 
+    function takePending(requestId: string | undefined): Pending | undefined {
+      const entry = requestId ? pending.current.get(requestId) : undefined;
+      if (!entry || !requestId) return undefined;
+      clearTimeout(entry.timer);
+      pending.current.delete(requestId);
+      setPendingCount(pending.current.size);
+      return entry;
+    }
+
+    function markConnected() {
+      attempts = 0;
+      connected.current = true;
+      setStatus("connected");
+    }
+
+    function onCommandOk(message: ServerEventOf<"command.ok">) {
+      if (message.payload.session) {
+        sessionRef.current = message.payload.session;
+        storeSession(message.payload.session);
+        version.current = -1;
+      }
+      if (message.payload.command === "room.leave") clearSession();
+      const entry = takePending(message.requestId);
+      logger.debug("command.confirmed", { requestId: message.requestId, command: message.payload.command,
+        version: message.payload.appliedVersion,
+        durationMs: entry ? Math.round(performance.now() - entry.startedAt) : undefined });
+      entry?.resolve(message.payload);
+    }
+
+    function onCommandError(message: ServerEventOf<"command.error">) {
+      logger.warn("command.rejected", { requestId: message.requestId, errorCode: message.payload.code,
+        command: message.requestId ? pending.current.get(message.requestId)?.command : undefined,
+        roomCode: sessionRef.current?.roomCode });
+      // O servidor pode ser mais novo que o cliente e enviar um código ainda sem tradução.
+      const text = errors[message.payload.code] ?? message.payload.message;
+      setError(text);
+      if (TERMINAL_ERROR_CODES.has(message.payload.code) && sessionRef.current) {
+        clearSession();
+        markConnected();
+      }
+      takePending(message.requestId)?.reject(new Error(text));
+    }
+
+    function onSnapshot(message: ServerEventOf<"state.snapshot">) {
+      if (sessionRef.current?.roomCode !== message.roomCode || message.version < version.current) {
+        logger.debug("state.ignored", { roomCode: message.roomCode, version: message.version, reason: "stale_or_different_room" });
+        return;
+      }
+      const { room } = message.payload;
+      logger.debug("state.received", { roomCode: message.roomCode, version: message.version,
+        phase: room.phase, roundId: room.round?.id, playerCount: room.players.length, paused: room.paused });
+      version.current = message.version;
+      const sound = soundTracker.current.observe(message.payload);
+      // Mesmo marcador autoritativo: sem replay em snapshots duplicados, reconexão ou aba oculta.
+      if (sound && REVEAL_SOUNDS.has(sound) && !document.hidden) {
+        setRevealRoundId(room.round?.result?.roundId ?? null);
+      } else if (!room.round?.result) {
+        setRevealRoundId(null);
+      }
+      if (sound) playSound(sound);
+      setSnapshot(message.payload);
+    }
+
+    function onSessionReplaced(message: ServerEventOf<"session.replaced">) {
+      setRevealRoundId(null);
+      soundTracker.current.resync();
+      stopSounds();
+      logger.warn("session.replaced", { roomCode: sessionRef.current?.roomCode });
+      replaced = true;
+      connected.current = false;
+      setStatus("replaced");
+      setNotice(message.payload.reason);
+    }
+
+    function handleServerEvent(socket: WebSocket, message: ServerEvent) {
+      switch (message.type) {
+        case "connection.ping":
+          socket.send(JSON.stringify({ type: "connection.pong", payload: message.payload }));
+          return;
+        case "server.config":
+          setFeatures({ botTestMode: message.payload.features.botTestMode === true });
+          return;
+        case "command.ok": return onCommandOk(message);
+        case "command.error": return onCommandError(message);
+        case "state.snapshot": return onSnapshot(message);
+        case "round.cancelled":
+          logger.info("round.cancelled", { roomCode: message.roomCode, roundId: message.payload.roundId });
+          setNotice(message.payload.reason);
+          return;
+        case "room.closed":
+          logger.info("room.closed", { roomCode: sessionRef.current?.roomCode });
+          clearSession();
+          setNotice(message.payload.reason);
+          return;
+        case "session.replaced": return onSessionReplaced(message);
+        case "server.restarting":
+          logger.warn("server.restarting");
+          setNotice(message.payload.message);
+          return;
+        case "round.result": return; // O resultado durável também está no snapshot.
+        default: {
+          const unhandled: never = message;
+          logger.warn("connection.unknown_event", { messageType: (unhandled as { type?: string }).type });
+        }
+      }
+    }
+
     function connect() {
       if (disposed || replaced) return;
       setFeatures({ botTestMode: false });
@@ -163,15 +293,11 @@ export function useGameConnection() {
         if (session) {
           void send("session.resume", { code: session.roomCode, token: session.token }).then(() => {
             if (disposed) return;
-            attempts = 0;
-            connected.current = true;
-            setStatus("connected");
+            markConnected();
             logger.info("session.resumed", { roomCode: session.roomCode, playerId: session.playerId });
           }).catch(() => { /* A resposta ou onclose determina o próximo estado. */ });
         } else {
-          attempts = 0;
-          connected.current = true;
-          setStatus("connected");
+          markConnected();
         }
       };
       socket.onmessage = event => {
@@ -183,100 +309,7 @@ export function useGameConnection() {
           setError("Resposta inválida do servidor. Atualize a página.");
           return;
         }
-        if (message.type === "connection.ping") {
-          socket.send(JSON.stringify({ type: "connection.pong", payload: message.payload }));
-          return;
-        }
-        switch (message.type) {
-          case "server.config":
-            setFeatures({ botTestMode: message.payload.features.botTestMode === true });
-            break;
-          case "command.ok": {
-            if (message.payload.session) {
-              sessionRef.current = message.payload.session;
-              storeSession(message.payload.session);
-              version.current = -1;
-            }
-            if (message.payload.command === "room.leave") clearSession();
-            const entry = pending.current.get(message.requestId);
-            logger.debug("command.confirmed", { requestId: message.requestId, command: message.payload.command,
-              version: message.payload.appliedVersion,
-              durationMs: entry ? Math.round(performance.now() - entry.startedAt) : undefined });
-            if (entry) {
-              clearTimeout(entry.timer);
-              pending.current.delete(message.requestId);
-              setPendingCount(pending.current.size);
-              entry.resolve(message.payload);
-            }
-            break;
-          }
-          case "command.error": {
-            logger.warn("command.rejected", { requestId: message.requestId, errorCode: message.payload.code,
-              command: message.requestId ? pending.current.get(message.requestId)?.command : undefined,
-              roomCode: sessionRef.current?.roomCode });
-            const text = errors[message.payload.code] ?? message.payload.message;
-            setError(text);
-            const terminal = ["ROOM_NOT_FOUND", "SESSION_INVALID", "SESSION_EXPIRED", "NOT_IN_ROOM"].includes(message.payload.code);
-            if (terminal && sessionRef.current) {
-              clearSession();
-              connected.current = true;
-              attempts = 0;
-              setStatus("connected");
-            }
-            if (message.requestId) {
-              const entry = pending.current.get(message.requestId);
-              if (entry) {
-                clearTimeout(entry.timer);
-                pending.current.delete(message.requestId);
-                setPendingCount(pending.current.size);
-                entry.reject(new Error(text));
-              }
-            }
-            break;
-          }
-          case "state.snapshot":
-            if (sessionRef.current?.roomCode === message.roomCode && message.version >= version.current) {
-              logger.debug("state.received", { roomCode: message.roomCode, version: message.version,
-                phase: message.payload.room.phase, roundId: message.payload.room.round?.id,
-                playerCount: message.payload.room.players.length, paused: message.payload.room.paused });
-              version.current = message.version;
-              const sound = soundTracker.current.observe(message.payload);
-              // Mesmo marcador autoritativo: sem replay em snapshots duplicados, reconexão ou aba oculta.
-              if (sound && ["result", "point", "victory", "judge_confirm", "ending", "judge_ending"].includes(sound) && !document.hidden) {
-                setRevealRoundId(message.payload.room.round?.result?.roundId ?? null);
-              } else if (!message.payload.room.round?.result) {
-                setRevealRoundId(null);
-              }
-              if (sound) playSound(sound);
-              setSnapshot(message.payload);
-            } else logger.debug("state.ignored", { roomCode: message.roomCode, version: message.version,
-              reason: "stale_or_different_room" });
-            break;
-          case "round.cancelled":
-            logger.info("round.cancelled", { roomCode: message.roomCode, roundId: message.payload.roundId });
-            setNotice(message.payload.reason);
-            break;
-          case "room.closed":
-            logger.info("room.closed", { roomCode: sessionRef.current?.roomCode });
-            clearSession();
-            setNotice(message.payload.reason);
-            break;
-          case "session.replaced":
-            setRevealRoundId(null);
-            soundTracker.current.resync();
-            stopSounds();
-            logger.warn("session.replaced", { roomCode: sessionRef.current?.roomCode });
-            replaced = true;
-            connected.current = false;
-            setStatus("replaced");
-            setNotice(message.payload.reason);
-            break;
-          case "server.restarting":
-            logger.warn("server.restarting");
-            setNotice(message.payload.message);
-            break;
-          case "round.result": break; // O resultado durável também está no snapshot.
-        }
+        handleServerEvent(socket, message);
       };
       socket.onclose = event => {
         if (disposed) return;
@@ -290,7 +323,7 @@ export function useGameConnection() {
         rejectPending();
         if (replaced) return;
         setStatus("reconnecting");
-        const delay = Math.min(10_000, 700 * 2 ** Math.min(attempts++, 5)) * (0.8 + Math.random() * 0.4);
+        const delay = reconnectDelay(attempts++);
         logger.info("connection.retry_scheduled", { attempt: attempts, delayMs: Math.round(delay) });
         retry = setTimeout(connect, delay);
       };

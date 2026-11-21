@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { useGameConnection } from "./connection/useGameConnection";
+import { isGameInProgress } from "../../shared/protocol";
+import { useGameConnection, type ConnectionStatus } from "./connection/useGameConnection";
 import { GameScreen } from "./screens/GameScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { LobbyScreen } from "./screens/LobbyScreen";
@@ -9,6 +10,14 @@ import { SoundControls } from "./components/SoundControls";
 import { CardFace } from "./components/CardFace";
 import { GameMenu } from "./components/GameMenu";
 
+const COPY_FEEDBACK_MS = 2_000;
+const STATUS_LABELS = {
+  connected: "Conectado",
+  replaced: "Sessão substituída",
+  reconnecting: "Reconectando…",
+  connecting: "Conectando…",
+} as const satisfies Record<ConnectionStatus, string>;
+
 export default function App() {
   const connection = useGameConnection();
   const { snapshot, status, features, busy, send } = connection;
@@ -16,8 +25,9 @@ export default function App() {
   const [copyFailed, setCopyFailed] = useState(false);
   const disabled = status !== "connected" || busy;
   const inGame = snapshot !== null && snapshot.room.phase !== "lobby";
-  const run = (promise: Promise<unknown>) => { void promise.catch(() => {}); };
-  const statusText = status === "connected" ? "Conectado" : status === "replaced" ? "Sessão substituída" : status === "reconnecting" ? "Reconectando…" : "Conectando…";
+  // Recusas e falhas já viram mensagem na tela pelo useGameConnection; aqui só evitamos rejeição não tratada.
+  const run = (promise: Promise<unknown>) => { void promise.catch(() => undefined); };
+  const statusText = STATUS_LABELS[status];
   async function copyInvite() {
     if (!snapshot) return;
     const url = new URL(location.origin);
@@ -26,12 +36,12 @@ export default function App() {
       await navigator.clipboard.writeText(url.toString());
       setCopied(true);
       setCopyFailed(false);
-      setTimeout(() => setCopied(false), 2_000);
+      setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
     } catch { setCopyFailed(true); }
   }
   function leave() {
     if (!snapshot) return;
-    if (snapshot.room.phase !== "lobby" && snapshot.room.phase !== "finished" &&
+    if (isGameInProgress(snapshot.room.phase) &&
         !window.confirm("Sair pode cancelar a rodada ou encerrar a partida. Deseja sair?")) return;
     run(send("room.leave", {}));
   }

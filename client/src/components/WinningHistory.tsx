@@ -1,4 +1,4 @@
-import type { WinningCombination } from "../../../shared/protocol";
+import { HISTORY_LIMIT, type WinningCombination } from "../../../shared/protocol";
 import { ResponseList } from "./AnswerOptions";
 import { FilledPrompt, fillsInline } from "./FilledPrompt";
 import { PlayerAvatar } from "./PlayerAvatar";
@@ -13,6 +13,6 @@ export function WinningHistory({ history }: { history: WinningCombination[] }) {
       {/* Sem lacunas para preencher, as cartas aparecem abaixo da pergunta. */}
       {!fillsInline(entry.prompt.text, entry.result.responseTexts.length) && <div className="history-response"><ResponseList texts={entry.result.responseTexts} /></div>}
     </li>)}</ol>
-    <p className="fine-print">Últimas 30 combinações vencedoras desta partida. Rodadas canceladas não entram no histórico.</p>
+    <p className="fine-print">Últimas {HISTORY_LIMIT} combinações vencedoras desta partida. Rodadas canceladas não entram no histórico.</p>
   </details>;
 }

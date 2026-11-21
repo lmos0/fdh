@@ -7,7 +7,7 @@ export const SOUND_STORAGE_KEY = "fdh.audio";
 export const DEFAULT_SOUND_PREFERENCES: SoundPreferences = { enabled: true, volume: .35 };
 
 export function soundPreferences(value: unknown): SoundPreferences {
-  const input = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   return {
     enabled: typeof input.enabled === "boolean" ? input.enabled : DEFAULT_SOUND_PREFERENCES.enabled,
     volume: typeof input.volume === "number" && Number.isFinite(input.volume)

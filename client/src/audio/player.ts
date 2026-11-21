@@ -3,6 +3,10 @@ import { soundRecipe } from "./recipes";
 import { canPlaySound, PRIORITY_GAIN, SOUND_PRIORITY } from "./policy";
 import { DEFAULT_SOUND_PREFERENCES, SOUND_STORAGE_KEY, soundPreferences, type SoundName, type SoundPreferences } from "./state";
 
+const MASTER_GAIN = 0.22;
+const SELECT_THROTTLE_MS = 55;
+const MAX_VOICES = 12;
+
 let preferences = { ...DEFAULT_SOUND_PREFERENCES };
 let initialized = false;
 let context: AudioContext | null = null;
@@ -35,7 +39,7 @@ function applyPreferences(next: SoundPreferences) {
   preferences = next;
   if (!next.enabled || next.volume === 0) stopSounds();
   if (context && output) {
-    try { output.gain.setTargetAtTime(next.enabled ? next.volume * .22 : 0, context.currentTime, .015); }
+    try { output.gain.setTargetAtTime(next.enabled ? next.volume * MASTER_GAIN : 0, context.currentTime, .015); }
     catch { /* Contextos encerrados pelo navegador não devem afetar os controles. */ }
   }
   for (const listener of listeners) listener();
@@ -59,7 +63,7 @@ export function unlockSound() {
       context = new AudioContextClass();
       noiseBuffer = null;
       output = context.createGain();
-      output.gain.value = preferences.volume * .22;
+      output.gain.value = preferences.volume * MASTER_GAIN;
       output.connect(context.destination);
     }
     if (context.state !== "running") {
@@ -95,13 +99,13 @@ export function playSound(name: SoundName, options: { position?: number } = {}):
   const priority = SOUND_PRIORITY[name];
   if (!canPlaySound(name, [...voices.values()].map(voice => voice.priority))) return false;
   const local = name === "select" || name === "remove";
-  if (local && now - lastSelectAt < 55) return false;
+  if (local && now - lastSelectAt < SELECT_THROTTLE_MS) return false;
   if (local) lastSelectAt = now;
   // Interações não cortam confirmações; prioridades iguais podem coexistir dentro do teto de vozes.
   for (const [source, voice] of voices) if (voice.priority < priority) stopVoice(source);
   try {
     const recipe = soundRecipe(name, variation++ % 3, options.position);
-    if (voices.size + recipe.length > 12) return false;
+    if (voices.size + recipe.length > MAX_VOICES) return false;
     const start = context.currentTime + .005;
     for (const tone of recipe) {
       let source: AudioScheduledSourceNode;

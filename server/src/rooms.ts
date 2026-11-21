@@ -1,22 +1,46 @@
 import { randomBytes, randomInt } from "node:crypto";
-import type { ClientCommand, CommandSuccess, ServerEvent } from "../../shared/protocol";
-import { MAX_PLAYERS } from "./cards";
-import type { Logger } from "../../shared/logging";
-import { logger as defaultLogger } from "./logger";
+import type {
+  ClientCommand, CommandPayloads, CommandSuccess, CommandType, ServerEvent, SessionCredential,
+} from "../../shared/protocol";
+import { DEFAULT_TARGET_SCORE, isGameInProgress, MAX_PLAYERS, RECONNECT_GRACE_SECONDS } from "../../shared/protocol";
+import type { LogFields, Logger } from "../../shared/logging";
+import { elapsedMs, logger as defaultLogger } from "./logger";
 import { requireRule, RuleError } from "./errors";
 import {
-  advanceRound, handleDepartures, initialGame, isPaused, judgeRound, restartGame, startGame,
-  submitCards, syncClocks, expirePhase, RESULT_DURATION_MS,
+  advanceRound, expirePhase, handleDepartures, hasConnectedHuman, initialGame, isNicknameTaken, isPaused,
+  judgeRound, MS_PER_SECOND, requireHost, restartGame, RESULT_DURATION_MS, startGame, submitCards, syncClocks,
 } from "./game";
 import { projectSnapshot } from "./projections";
 import { addTestBots, runDueBotAction, syncBotAction } from "./bots";
 import type { CachedRequest, Catalog, Effects, GameNotice, GameRoom, Player, Session } from "./types";
 
-export const RECONNECT_GRACE_MS = 60_000;
+export const RECONNECT_GRACE_MS = RECONNECT_GRACE_SECONDS * MS_PER_SECOND;
 const EMPTY_ROOM_MS = 5 * 60_000;
 const FINISHED_ROOM_MS = 15 * 60_000;
 const REQUEST_TTL_MS = 2 * 60_000;
+const MAX_CACHED_REQUESTS = 50;
+const DEFAULT_MAX_ROOMS = 50;
+const DEFAULT_PHASE_TIME_LIMIT_SECONDS = 60;
+const ROOM_CODE_LENGTH = 6;
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const SESSION_TOKEN_BYTES = 32;
+const INTERNAL_ERROR_MESSAGE = "Não foi possível concluir a ação.";
+
+type StateSummary = { phase: GameRoom["game"]["phase"]; roundId: string | undefined; paused: boolean };
+interface Membership { session: Session; room: GameRoom; player: Player }
+interface CommandContext {
+  connectionId: string;
+  requestId: string;
+  timestamp: number;
+  output: Effects;
+  success: CommandSuccess;
+  log: LogFields;
+}
+interface CommandOutcome { room?: GameRoom; notices?: GameNotice[] }
+type CommandHandler<K extends CommandType> = (payload: CommandPayloads[K], context: CommandContext) => CommandOutcome;
+type CommandHandlers = { [K in CommandType]: CommandHandler<K> };
+type MemberHandler<K extends CommandType> =
+  (payload: CommandPayloads[K], membership: Membership, context: CommandContext) => GameNotice[] | void;
 
 export function createRoomService(catalog: Catalog, options: {
   now?: () => number; maxRooms?: number; logger?: Logger; botTestModeEnabled?: boolean;
@@ -28,15 +52,15 @@ export function createRoomService(catalog: Catalog, options: {
   const bindings = new Map<string, string>();
   const connectionRequests = new Map<string, Map<string, CachedRequest>>();
   const replacedConnections = new Set<string>();
-  const maxRooms = options.maxRooms ?? 50;
+  const maxRooms = options.maxRooms ?? DEFAULT_MAX_ROOMS;
   const botTestModeEnabled = options.botTestModeEnabled === true;
   const effects = (): Effects => ({ deliveries: [], closeConnections: [] });
 
-  function stateSummary(room: GameRoom) {
+  function stateSummary(room: GameRoom): StateSummary {
     return { phase: room.game.phase, roundId: room.game.round?.id, paused: isPaused(room) };
   }
 
-  function logTransition(room: GameRoom, previous: ReturnType<typeof stateSummary> | undefined) {
+  function logTransition(room: GameRoom, previous: StateSummary | undefined): void {
     const context = {
       roomCode: room.code, version: room.version, phase: room.game.phase,
       roundId: room.game.round?.id, playerCount: room.players.size,
@@ -50,8 +74,8 @@ export function createRoomService(catalog: Catalog, options: {
         judgePlayerId: round.judgePlayerId, pick: round.pick, draw: round.draw });
     }
     if (previous && room.game.phase !== "finished" && previous.paused !== isPaused(room)) {
-      logger.info(isPaused(room) ? "game.paused" : "game.resumed", { ...context,
-        paused: isPaused(room), connectedPlayers: [...room.players.values()].filter(p => p.disconnectedAt === null).length });
+      logger.info(isPaused(room) ? "game.paused" : "game.resumed", { ...context, paused: isPaused(room),
+        connectedPlayers: [...room.players.values()].filter(player => player.disconnectedAt === null).length });
     }
     if (room.game.phase === "finished" && previous?.phase !== "finished") {
       logger.info("game.finished", { ...context, winnerPlayerId: room.game.winnerPlayerId,
@@ -69,6 +93,10 @@ export function createRoomService(catalog: Catalog, options: {
     return player.sessionToken ? sessions.get(player.sessionToken) : undefined;
   }
 
+  function credentialFor(session: Session): SessionCredential {
+    return { roomCode: session.roomCode, playerId: session.playerId, token: session.token };
+  }
+
   function cacheFor(connectionId: string): Map<string, CachedRequest> {
     const session = sessionForConnection(connectionId);
     if (session) return session.requests;
@@ -80,25 +108,32 @@ export function createRoomService(catalog: Catalog, options: {
     return requests;
   }
 
+  function snapshotEvent(room: GameRoom, playerId: string, timestamp: number): ServerEvent {
+    return {
+      type: "state.snapshot", roomCode: room.code, version: room.version,
+      payload: projectSnapshot(room, playerId, catalog, timestamp),
+    };
+  }
+
   function queueSnapshots(room: GameRoom, output: Effects): void {
     for (const player of room.players.values()) {
       const connectionId = sessionForPlayer(player)?.connectionId;
-      if (connectionId) output.deliveries.push({ connectionId, event: {
-        type: "state.snapshot", roomCode: room.code, version: room.version,
-        payload: projectSnapshot(room, player.id, catalog, now()),
-      } });
+      if (connectionId) output.deliveries.push({ connectionId, event: snapshotEvent(room, player.id, now()) });
     }
+  }
+
+  function logNotice(room: GameRoom, notice: GameNotice): void {
+    const context = { roomCode: room.code, version: room.version, roundId: notice.payload.roundId };
+    if (notice.type === "round.result") {
+      logger.info("round.completed", { ...context, winnerPlayerId: notice.payload.winnerPlayerId });
+      return;
+    }
+    logger.info("round.cancelled", { ...context, reason: notice.payload.reason });
   }
 
   function queueNotices(room: GameRoom, notices: GameNotice[], output: Effects): void {
     for (const notice of notices) {
-      if (notice.type === "round.result") {
-        logger.info("round.completed", { roomCode: room.code, version: room.version,
-          roundId: notice.payload.roundId, winnerPlayerId: notice.payload.winnerPlayerId });
-      } else {
-        logger.info("round.cancelled", { roomCode: room.code, version: room.version,
-          roundId: notice.payload.roundId, reason: notice.payload.reason });
-      }
+      logNotice(room, notice);
       for (const player of room.players.values()) {
         const connectionId = sessionForPlayer(player)?.connectionId;
         if (connectionId) output.deliveries.push({ connectionId, event: {
@@ -108,33 +143,41 @@ export function createRoomService(catalog: Catalog, options: {
     }
   }
 
-  function touch(room: GameRoom, timestamp: number): void {
-    room.version++;
-    room.updatedAt = timestamp;
-    const anyConnected = [...room.players.values()].some(p => !p.isBot && p.disconnectedAt === null);
-    room.emptySince = anyConnected ? null : (room.emptySince ?? timestamp);
-    syncClocks(room, timestamp);
-    syncBotAction(room, timestamp);
-  }
-
-  function processDue(room: GameRoom, timestamp: number, output: Effects): void {
-    const previous = stateSummary(room);
-    let notices = expirePhase(room, catalog, timestamp);
-    const round = room.game.round;
-    if (room.game.phase === "round_result" && !isPaused(room) && round?.nextRoundAt != null && timestamp >= round.nextRoundAt) {
-      advanceRound(room, catalog, timestamp);
-      notices = [];
-    }
-    if (notices === null) return;
-    touch(room, timestamp);
+  function broadcastChange(room: GameRoom, previous: StateSummary, notices: GameNotice[], output: Effects): void {
     logTransition(room, previous);
     queueNotices(room, notices, output);
     queueSnapshots(room, output);
   }
 
+  function touch(room: GameRoom, timestamp: number): void {
+    room.version++;
+    room.updatedAt = timestamp;
+    room.emptySince = hasConnectedHuman(room) ? null : (room.emptySince ?? timestamp);
+    syncClocks(room, timestamp);
+    syncBotAction(room, timestamp);
+  }
+
+  function resultIntervalElapsed(room: GameRoom, timestamp: number): boolean {
+    const nextRoundAt = room.game.round?.nextRoundAt;
+    if (room.game.phase !== "round_result" || isPaused(room)) return false;
+    return nextRoundAt !== null && nextRoundAt !== undefined && timestamp >= nextRoundAt;
+  }
+
+  function processDue(room: GameRoom, timestamp: number, output: Effects): void {
+    const previous = stateSummary(room);
+    let notices = expirePhase(room, catalog, timestamp);
+    if (resultIntervalElapsed(room, timestamp)) {
+      advanceRound(room, catalog, timestamp);
+      notices = [];
+    }
+    if (notices === null) return;
+    touch(room, timestamp);
+    broadcastChange(room, previous, notices, output);
+  }
+
   function addPlayer(room: GameRoom, connectionId: string, nickname: string, timestamp: number): Session {
-    requireRule(![...room.players.values()].some(p => p.nickname.toLocaleLowerCase("pt-BR") === nickname.toLocaleLowerCase("pt-BR")), "NICKNAME_TAKEN");
-    const token = randomBytes(32).toString("hex");
+    requireRule(!isNicknameTaken(room, nickname), "NICKNAME_TAKEN");
+    const token = randomBytes(SESSION_TOKEN_BYTES).toString("hex");
     const player: Player = {
       id: crypto.randomUUID(), nickname, score: 0, hand: [], joinedAt: timestamp,
       disconnectedAt: null, sessionToken: token, isBot: false,
@@ -150,7 +193,7 @@ export function createRoomService(catalog: Catalog, options: {
     return session;
   }
 
-  function member(connectionId: string): { session: Session; room: GameRoom; player: Player } {
+  function member(connectionId: string): Membership {
     const session = sessionForConnection(connectionId);
     requireRule(session, "SESSION_REQUIRED");
     const room = rooms.get(session.roomCode);
@@ -160,34 +203,44 @@ export function createRoomService(catalog: Catalog, options: {
     return { session, room, player };
   }
 
-  function removePlayers(room: GameRoom, playerIds: string[], timestamp: number, reason: "left" | "reconnect_timeout"): GameNotice[] {
+  /** Em sala de teste, a saída da última pessoa encerra também os bots. */
+  function playersToRemove(room: GameRoom, playerIds: string[]): string[] {
+    const humanRemains = [...room.players.values()].some(player => !player.isBot && !playerIds.includes(player.id));
+    return room.mode === "test" && !humanRemains ? [...room.players.keys()] : playerIds;
+  }
+
+  function detachPlayer(room: GameRoom, player: Player, reason: "left" | "reconnect_timeout"): void {
+    // A carta enviada pertence à rodada; apenas as cartas ainda na mão são descartadas aqui.
+    room.game.responseDeck.discardPile.push(...player.hand);
+    const session = sessionForPlayer(player);
+    if (session?.connectionId) {
+      bindings.delete(session.connectionId);
+      connectionRequests.set(session.connectionId, session.requests);
+    }
+    if (player.sessionToken) sessions.delete(player.sessionToken);
+    room.players.delete(player.id);
+    logger.info("player.removed", { roomCode: room.code, playerId: player.id, reason,
+      playerCount: room.players.size, isBot: player.isBot });
+  }
+
+  function reassignHost(room: GameRoom): void {
+    if (room.players.has(room.hostPlayerId)) return;
     const previousHostPlayerId = room.hostPlayerId;
-    const removeAll = room.mode === "test" && ![...room.players.values()]
-      .some(player => !player.isBot && !playerIds.includes(player.id));
-    for (const id of removeAll ? [...room.players.keys()] : playerIds) {
+    const remaining = [...room.players.values()];
+    room.hostPlayerId = (remaining.find(player => player.disconnectedAt === null) ?? remaining[0])?.id ?? "";
+    if (!room.hostPlayerId) return;
+    logger.info("room.host_changed", { roomCode: room.code, previousHostPlayerId, hostPlayerId: room.hostPlayerId });
+  }
+
+  function removePlayers(room: GameRoom, playerIds: string[], timestamp: number, reason: "left" | "reconnect_timeout"): GameNotice[] {
+    for (const id of playersToRemove(room, playerIds)) {
       const player = room.players.get(id);
-      if (!player) continue;
-      // A carta enviada pertence à rodada; apenas as cartas ainda na mão são descartadas aqui.
-      room.game.responseDeck.discardPile.push(...player.hand);
-      const session = sessionForPlayer(player);
-      if (session?.connectionId) {
-        bindings.delete(session.connectionId);
-        connectionRequests.set(session.connectionId, session.requests);
-      }
-      if (player.sessionToken) sessions.delete(player.sessionToken);
-      room.players.delete(id);
-      logger.info("player.removed", { roomCode: room.code, playerId: id, reason, playerCount: room.players.size, isBot: player.isBot });
+      if (player) detachPlayer(room, player, reason);
     }
     if (room.game.phase === "lobby") {
       room.playerOrder = room.playerOrder.filter(id => room.players.has(id));
     }
-    if (!room.players.has(room.hostPlayerId)) {
-      const remaining = [...room.players.values()];
-      room.hostPlayerId = (remaining.find(p => p.disconnectedAt === null) ?? remaining[0])?.id ?? "";
-    }
-    if (room.hostPlayerId && previousHostPlayerId !== room.hostPlayerId) {
-      logger.info("room.host_changed", { roomCode: room.code, previousHostPlayerId, hostPlayerId: room.hostPlayerId });
-    }
+    reassignHost(room);
     const notices = handleDepartures(room, timestamp, catalog);
     if (!room.players.size) {
       rooms.delete(room.code);
@@ -213,6 +266,232 @@ export function createRoomService(catalog: Catalog, options: {
       activeRooms: rooms.size, lifetimeMs: now() - room.createdAt });
   }
 
+  function generateRoomCode(): string {
+    let code: string;
+    do {
+      code = Array.from({ length: ROOM_CODE_LENGTH }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
+    } while (rooms.has(code));
+    return code;
+  }
+
+  function newRoom(code: string, payload: CommandPayloads["room.create"], timestamp: number): GameRoom {
+    return {
+      code, hostPlayerId: "", players: new Map(), playerOrder: [],
+      mode: payload.mode ?? "private", pendingBotAction: null,
+      settings: {
+        targetScore: payload.targetScore ?? DEFAULT_TARGET_SCORE,
+        phaseTimeLimitSeconds: DEFAULT_PHASE_TIME_LIMIT_SECONDS,
+        resultIntervalSeconds: RESULT_DURATION_MS / MS_PER_SECOND,
+      },
+      game: initialGame(), version: 0, createdAt: timestamp, updatedAt: timestamp, emptySince: null,
+    };
+  }
+
+
+  function createRoom(payload: CommandPayloads["room.create"], context: CommandContext): CommandOutcome {
+    requireRule(!sessionForConnection(context.connectionId), "ALREADY_IN_ROOM");
+    requireRule(payload.mode !== "test" || botTestModeEnabled, "FEATURE_DISABLED");
+    requireRule(rooms.size < maxRooms, "SERVER_FULL");
+    const room = newRoom(generateRoomCode(), payload, context.timestamp);
+    const session = addPlayer(room, context.connectionId, payload.nickname, context.timestamp);
+    room.hostPlayerId = session.playerId;
+    if (room.mode === "test") addTestBots(room, context.timestamp);
+    rooms.set(room.code, room);
+    context.success.session = credentialFor(session);
+    logger.info("room.created", { connectionId: context.connectionId, requestId: context.requestId,
+      roomCode: room.code, playerId: session.playerId, targetScore: room.settings.targetScore,
+      activeRooms: rooms.size, maxRooms, roomMode: room.mode });
+    return { room };
+  }
+
+  function joinRoom(payload: CommandPayloads["room.join"], context: CommandContext): CommandOutcome {
+    requireRule(!sessionForConnection(context.connectionId), "ALREADY_IN_ROOM");
+    const room = rooms.get(payload.code);
+    requireRule(room, "ROOM_NOT_FOUND");
+    requireRule(room.mode !== "test", "TEST_ROOM_PRIVATE");
+    requireRule(room.game.phase === "lobby", "GAME_ALREADY_STARTED");
+    requireRule(room.players.size < MAX_PLAYERS, "ROOM_FULL");
+    const session = addPlayer(room, context.connectionId, payload.nickname, context.timestamp);
+    context.success.session = credentialFor(session);
+    logger.info("player.joined", { connectionId: context.connectionId, requestId: context.requestId,
+      roomCode: room.code, playerId: session.playerId, playerCount: room.players.size });
+    return { room };
+  }
+
+  function canReconnect(player: Player, timestamp: number): boolean {
+    return player.disconnectedAt === null || timestamp - player.disconnectedAt < RECONNECT_GRACE_MS;
+  }
+
+  function replacePreviousConnection(room: GameRoom, session: Session, context: CommandContext): void {
+    const previousId = session.connectionId;
+    if (!previousId || previousId === context.connectionId) return;
+    logger.info("session.replaced", { connectionId: context.connectionId, previousConnectionId: previousId,
+      roomCode: room.code, playerId: session.playerId });
+    bindings.delete(previousId);
+    connectionRequests.delete(previousId);
+    replacedConnections.add(previousId);
+    context.output.deliveries.push({ connectionId: previousId, event: {
+      type: "session.replaced", payload: { reason: "Sua sessão foi aberta em outra conexão." },
+    } });
+    context.output.closeConnections.push(previousId);
+  }
+
+  function resumeSession(payload: CommandPayloads["session.resume"], context: CommandContext): CommandOutcome {
+    const room = rooms.get(payload.code);
+    requireRule(room, "ROOM_NOT_FOUND");
+    const session = sessions.get(payload.token);
+    requireRule(session && session.roomCode === room.code, "SESSION_INVALID");
+    const current = sessionForConnection(context.connectionId);
+    requireRule(!current || current === session, "ALREADY_IN_ROOM");
+    const player = room.players.get(session.playerId);
+    requireRule(player, "SESSION_INVALID");
+    requireRule(canReconnect(player, context.timestamp), "SESSION_EXPIRED");
+    replacePreviousConnection(room, session, context);
+    session.connectionId = context.connectionId;
+    bindings.set(context.connectionId, session.token);
+    connectionRequests.delete(context.connectionId);
+    player.disconnectedAt = null;
+    logger.info("session.resumed", { connectionId: context.connectionId, requestId: context.requestId,
+      roomCode: room.code, playerId: player.id });
+    return { room };
+  }
+
+
+  function forMember<K extends CommandType>(handler: MemberHandler<K>): CommandHandler<K> {
+    return (payload, context) => {
+      const membership = member(context.connectionId);
+      return { room: membership.room, notices: handler(payload, membership, context) ?? [] };
+    };
+  }
+
+  const leaveRoom: MemberHandler<"room.leave"> = (_payload, { room, player }, context) =>
+    removePlayers(room, [player.id], context.timestamp, "left");
+
+  const configureRoom: MemberHandler<"room.configure"> = (payload, { room, player }, context) => {
+    requireHost(room, player);
+    requireRule(room.game.phase === "lobby", "INVALID_PHASE");
+    room.settings.targetScore = payload.targetScore;
+    // Campos omitidos preservam a configuração; `null` significa "sem limite".
+    if (payload.phaseTimeLimitSeconds !== undefined) room.settings.phaseTimeLimitSeconds = payload.phaseTimeLimitSeconds;
+    if (payload.resultIntervalSeconds !== undefined) room.settings.resultIntervalSeconds = payload.resultIntervalSeconds;
+    logger.info("room.configured", { ...context.log, targetScore: room.settings.targetScore,
+      phaseTimeLimitSeconds: room.settings.phaseTimeLimitSeconds, resultIntervalSeconds: room.settings.resultIntervalSeconds });
+  };
+
+  const beginGame: MemberHandler<"game.start"> = (_payload, { room, player }, context) => {
+    requireHost(room, player);
+    startGame(room, catalog, context.timestamp);
+    logger.info("game.started", { ...context.log, playerCount: room.players.size, targetScore: room.settings.targetScore });
+  };
+
+  const restartRoomGame: MemberHandler<"game.restart"> = (payload, { room, player }, context) => {
+    requireHost(room, player);
+    restartGame(room, catalog, context.timestamp, payload.toLobby === true);
+    logger.info("game.restarted", { ...context.log, playerCount: room.players.size,
+      targetScore: room.settings.targetScore, phase: room.game.phase });
+  };
+
+  const pauseGame: MemberHandler<"game.pause"> = (payload, { room }, context) => {
+    requireRule(isGameInProgress(room.game.phase), "INVALID_PHASE");
+    requireRule(room.game.round?.id === payload.roundId, "STALE_ROUND");
+    room.game.collectivelyPaused = payload.paused;
+    logger.info("game.collective_pause_changed", { ...context.log, collectivelyPaused: room.game.collectivelyPaused });
+  };
+
+  const advanceResult: MemberHandler<"round.advance"> = (payload, { room, player }, context) => {
+    requireHost(room, player);
+    requireRule(room.game.round?.id === payload.roundId, "STALE_ROUND");
+    requireRule(room.game.phase === "round_result", "INVALID_PHASE");
+    requireRule(!isPaused(room), "GAME_PAUSED");
+    advanceRound(room, catalog, context.timestamp);
+  };
+
+  const submitResponse: MemberHandler<"round.submit"> = (payload, { room, player }, context) => {
+    submitCards(room, player, payload.roundId, payload.cardIds, context.timestamp);
+  };
+
+  const judgeResponse: MemberHandler<"round.judge"> = (payload, { room, player }, context) =>
+    [judgeRound(room, player, payload.roundId, payload.optionId, catalog, context.timestamp)];
+
+  const commandHandlers: CommandHandlers = {
+    "room.create": createRoom,
+    "room.join": joinRoom,
+    "session.resume": resumeSession,
+    "room.leave": forMember(leaveRoom),
+    "room.configure": forMember(configureRoom),
+    "game.start": forMember(beginGame),
+    "game.restart": forMember(restartRoomGame),
+    "game.pause": forMember(pauseGame),
+    "round.advance": forMember(advanceResult),
+    "round.submit": forMember(submitResponse),
+    "round.judge": forMember(judgeResponse),
+  };
+
+  function runHandler<K extends CommandType>(command: { type: K; payload: CommandPayloads[K] }, context: CommandContext): CommandOutcome {
+    return commandHandlers[command.type](command.payload, context);
+  }
+
+
+  function pruneExpiredRequests(cache: Map<string, CachedRequest>, timestamp: number): void {
+    for (const [id, entry] of cache) {
+      if (timestamp - entry.createdAt >= REQUEST_TTL_MS) cache.delete(id);
+    }
+  }
+
+  function rememberResponse(connectionId: string, requestId: string, entry: CachedRequest): void {
+    const cache = cacheFor(connectionId);
+    cache.set(requestId, entry);
+    while (cache.size > MAX_CACHED_REQUESTS) cache.delete(cache.keys().next().value!);
+  }
+
+  function replayResponse(connectionId: string, cached: CachedRequest, context: CommandContext): void {
+    logger.debug("command.replayed", { ...context.log, messageType: cached.response.type });
+    context.output.deliveries.push({ connectionId, event: cached.response });
+    const session = sessionForConnection(connectionId);
+    const room = session ? rooms.get(session.roomCode) : undefined;
+    if (room && session) context.output.deliveries.push({ connectionId, event: snapshotEvent(room, session.playerId, context.timestamp) });
+  }
+
+  function acceptCommand(outcome: CommandOutcome, context: CommandContext, previous: StateSummary | undefined, startedAt: number): ServerEvent {
+    const { room, notices = [] } = outcome;
+    const roomActive = room !== undefined && rooms.has(room.code);
+    if (roomActive) {
+      touch(room, context.timestamp);
+      context.success.appliedVersion = room.version;
+      logTransition(room, previous);
+    }
+    const response: ServerEvent = { type: "command.ok", requestId: context.requestId, payload: context.success };
+    context.output.deliveries.push({ connectionId: context.connectionId, event: response });
+    const round = room?.game.round;
+    logger.debug("command.accepted", { ...context.log, roomCode: room?.code ?? context.log.roomCode,
+      playerId: sessionForConnection(context.connectionId)?.playerId ?? context.log.playerId,
+      version: context.success.appliedVersion, phase: room?.game.phase, roundId: round?.id,
+      receivedCount: round?.submissions.size, expectedCount: round?.respondentPlayerIds.length,
+      durationMs: elapsedMs(startedAt) });
+    if (roomActive) {
+      queueNotices(room, notices, context.output);
+      queueSnapshots(room, context.output);
+    }
+    return response;
+  }
+
+  function rejectCommand(error: unknown, context: CommandContext, targetRoom: GameRoom | undefined): ServerEvent {
+    const ruleError = error instanceof RuleError ? error : null;
+    if (ruleError) {
+      logger.warn("command.rejected", { ...context.log, errorCode: ruleError.code,
+        phase: targetRoom?.game.phase, roundId: targetRoom?.game.round?.id });
+    } else {
+      logger.error("command.failed", { ...context.log, errorCode: "INTERNAL_ERROR" }, error);
+    }
+    // Erros inesperados nunca expõem detalhes internos ao cliente.
+    const response: ServerEvent = { type: "command.error", requestId: context.requestId, payload: {
+      code: ruleError?.code ?? "INTERNAL_ERROR",
+      message: ruleError?.code ?? INTERNAL_ERROR_MESSAGE,
+    } };
+    context.output.deliveries.push({ connectionId: context.connectionId, event: response });
+    return response;
+  }
+
   function execute(connectionId: string, command: ClientCommand): Effects {
     const output = effects();
     const timestamp = now();
@@ -223,24 +502,17 @@ export function createRoomService(catalog: Catalog, options: {
     // A manutenção é apenas um despertador: comandos no limite também respeitam o relógio.
     if (targetRoom) processDue(targetRoom, timestamp, output);
     const previous = targetRoom ? stateSummary(targetRoom) : undefined;
-    const context = { connectionId, requestId: command.requestId, command: command.type,
-      roomCode, playerId: activeSession?.playerId };
-    logger.debug("command.received", context);
+    const context: CommandContext = {
+      connectionId, requestId: command.requestId, timestamp, output, success: { command: command.type },
+      log: { connectionId, requestId: command.requestId, command: command.type, roomCode, playerId: activeSession?.playerId },
+    };
+    logger.debug("command.received", context.log);
     const requestCache = cacheFor(connectionId);
-    for (const [id, entry] of requestCache) {
-      if (timestamp - entry.createdAt >= REQUEST_TTL_MS) requestCache.delete(id);
-    }
+    pruneExpiredRequests(requestCache, timestamp);
     const fingerprint = JSON.stringify([command.type, command.payload]);
     const cached = requestCache.get(command.requestId);
     if (cached && cached.fingerprint === fingerprint && !replacedConnections.has(connectionId)) {
-      logger.debug("command.replayed", { ...context, messageType: cached.response.type });
-      output.deliveries.push({ connectionId, event: cached.response });
-      const session = sessionForConnection(connectionId);
-      const room = session ? rooms.get(session.roomCode) : undefined;
-      if (room && session) output.deliveries.push({ connectionId, event: {
-        type: "state.snapshot", roomCode: room.code, version: room.version,
-        payload: projectSnapshot(room, session.playerId, catalog, timestamp),
-      } });
+      replayResponse(connectionId, cached, context);
       return output;
     }
 
@@ -248,168 +520,12 @@ export function createRoomService(catalog: Catalog, options: {
     try {
       requireRule(!replacedConnections.has(connectionId), "CONNECTION_REPLACED");
       requireRule(!cached, "REQUEST_ID_REUSED");
-      let changedRoom: GameRoom | undefined;
-      let notices: GameNotice[] = [];
-      const success: CommandSuccess = { command: command.type };
-      switch (command.type) {
-        case "room.create": {
-          requireRule(!sessionForConnection(connectionId), "ALREADY_IN_ROOM");
-          requireRule(command.payload.mode !== "test" || botTestModeEnabled, "FEATURE_DISABLED");
-          requireRule(rooms.size < maxRooms, "SERVER_FULL");
-          let code: string;
-          do {
-            code = Array.from({ length: 6 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join("");
-          } while (rooms.has(code));
-          const room: GameRoom = {
-            code, hostPlayerId: "", players: new Map(), playerOrder: [],
-            mode: command.payload.mode ?? "private", pendingBotAction: null,
-            settings: { targetScore: command.payload.targetScore ?? 5, phaseTimeLimitSeconds: 60, resultIntervalSeconds: RESULT_DURATION_MS / 1_000 },
-            game: initialGame(), version: 0, createdAt: timestamp, updatedAt: timestamp, emptySince: null,
-          };
-          const session = addPlayer(room, connectionId, command.payload.nickname, timestamp);
-          room.hostPlayerId = session.playerId;
-          if (room.mode === "test") addTestBots(room, timestamp);
-          rooms.set(code, room);
-          success.session = { roomCode: code, playerId: session.playerId, token: session.token };
-          changedRoom = room;
-          logger.info("room.created", { connectionId, requestId: command.requestId, roomCode: code,
-            playerId: session.playerId, targetScore: room.settings.targetScore, activeRooms: rooms.size, maxRooms,
-            roomMode: room.mode });
-          break;
-        }
-        case "room.join": {
-          requireRule(!sessionForConnection(connectionId), "ALREADY_IN_ROOM");
-          const room = rooms.get(command.payload.code);
-          requireRule(room, "ROOM_NOT_FOUND");
-          requireRule(room.mode !== "test", "TEST_ROOM_PRIVATE");
-          requireRule(room.game.phase === "lobby", "GAME_ALREADY_STARTED");
-          requireRule(room.players.size < MAX_PLAYERS, "ROOM_FULL");
-          const session = addPlayer(room, connectionId, command.payload.nickname, timestamp);
-          success.session = { roomCode: room.code, playerId: session.playerId, token: session.token };
-          changedRoom = room;
-          logger.info("player.joined", { connectionId, requestId: command.requestId, roomCode: room.code,
-            playerId: session.playerId, playerCount: room.players.size });
-          break;
-        }
-        case "session.resume": {
-          const room = rooms.get(command.payload.code);
-          requireRule(room, "ROOM_NOT_FOUND");
-          const session = sessions.get(command.payload.token);
-          requireRule(session && session.roomCode === room.code, "SESSION_INVALID");
-          const current = sessionForConnection(connectionId);
-          requireRule(!current || current === session, "ALREADY_IN_ROOM");
-          const player = room.players.get(session.playerId);
-          requireRule(player, "SESSION_INVALID");
-          requireRule(player.disconnectedAt === null || timestamp - player.disconnectedAt < RECONNECT_GRACE_MS, "SESSION_EXPIRED");
-          if (session.connectionId && session.connectionId !== connectionId) {
-            const oldId = session.connectionId;
-            logger.info("session.replaced", { connectionId, previousConnectionId: oldId,
-              roomCode: room.code, playerId: session.playerId });
-            bindings.delete(oldId);
-            connectionRequests.delete(oldId);
-            replacedConnections.add(oldId);
-            output.deliveries.push({ connectionId: oldId, event: {
-              type: "session.replaced", payload: { reason: "Sua sessão foi aberta em outra conexão." },
-            } });
-            output.closeConnections.push(oldId);
-          }
-          session.connectionId = connectionId;
-          bindings.set(connectionId, session.token);
-          connectionRequests.delete(connectionId);
-          player.disconnectedAt = null;
-          changedRoom = room;
-          logger.info("session.resumed", { connectionId, requestId: command.requestId,
-            roomCode: room.code, playerId: player.id });
-          break;
-        }
-        default: {
-          const { room, player } = member(connectionId);
-          changedRoom = room;
-          switch (command.type) {
-            case "room.leave":
-              notices = removePlayers(room, [player.id], timestamp, "left");
-              break;
-            case "room.configure":
-              requireRule(room.hostPlayerId === player.id, "NOT_HOST");
-              requireRule(room.game.phase === "lobby", "INVALID_PHASE");
-              room.settings.targetScore = command.payload.targetScore;
-              if (command.payload.phaseTimeLimitSeconds !== undefined) {
-                room.settings.phaseTimeLimitSeconds = command.payload.phaseTimeLimitSeconds;
-              }
-              if (command.payload.resultIntervalSeconds !== undefined) {
-                room.settings.resultIntervalSeconds = command.payload.resultIntervalSeconds;
-              }
-              logger.info("room.configured", { ...context, targetScore: room.settings.targetScore,
-                phaseTimeLimitSeconds: room.settings.phaseTimeLimitSeconds, resultIntervalSeconds: room.settings.resultIntervalSeconds });
-              break;
-            case "game.start":
-              requireRule(room.hostPlayerId === player.id, "NOT_HOST");
-               startGame(room, catalog, timestamp);
-              logger.info("game.started", { ...context, playerCount: room.players.size,
-                targetScore: room.settings.targetScore });
-              break;
-            case "game.restart":
-              requireRule(room.hostPlayerId === player.id, "NOT_HOST");
-              restartGame(room, catalog, timestamp, command.payload.toLobby === true);
-              logger.info("game.restarted", { ...context, playerCount: room.players.size,
-                targetScore: room.settings.targetScore, phase: room.game.phase });
-              break;
-            case "game.pause":
-              requireRule(room.game.phase !== "lobby" && room.game.phase !== "finished", "INVALID_PHASE");
-              requireRule(room.game.round?.id === command.payload.roundId, "STALE_ROUND");
-              room.game.collectivelyPaused = command.payload.paused;
-              logger.info("game.collective_pause_changed", { ...context, collectivelyPaused: room.game.collectivelyPaused });
-              break;
-            case "round.advance":
-              requireRule(room.hostPlayerId === player.id, "NOT_HOST");
-              requireRule(room.game.round?.id === command.payload.roundId, "STALE_ROUND");
-              requireRule(room.game.phase === "round_result", "INVALID_PHASE");
-              requireRule(!isPaused(room), "GAME_PAUSED");
-              advanceRound(room, catalog, timestamp);
-              break;
-            case "round.submit":
-              submitCards(room, player, command.payload.roundId, command.payload.cardIds, timestamp);
-              break;
-            case "round.judge":
-              notices = [judgeRound(room, player, command.payload.roundId, command.payload.optionId, catalog, timestamp)];
-              break;
-          }
-        }
-      }
-      if (changedRoom) {
-        touch(changedRoom, timestamp);
-        success.appliedVersion = changedRoom.version;
-        logTransition(changedRoom, previous);
-      }
-      response = { type: "command.ok", requestId: command.requestId, payload: success };
-      output.deliveries.push({ connectionId, event: response });
-      logger.debug("command.accepted", { ...context, roomCode: changedRoom?.code ?? roomCode,
-        playerId: sessionForConnection(connectionId)?.playerId ?? context.playerId,
-        version: success.appliedVersion, phase: changedRoom?.game.phase,
-        roundId: changedRoom?.game.round?.id,
-        receivedCount: changedRoom?.game.round?.submissions.size,
-        expectedCount: changedRoom?.game.round?.respondentPlayerIds.length,
-        durationMs: Math.round((performance.now() - startedAt) * 100) / 100 });
-      if (changedRoom) {
-        queueNotices(changedRoom, notices, output);
-        queueSnapshots(changedRoom, output);
-      }
+      response = acceptCommand(runHandler(command, context), context, previous, startedAt);
     } catch (error) {
-      if (error instanceof RuleError) logger.warn("command.rejected", { ...context, errorCode: error.code,
-        phase: targetRoom?.game.phase, roundId: targetRoom?.game.round?.id });
-      else logger.error("command.failed", { ...context, errorCode: "INTERNAL_ERROR" }, error);
-      response = { type: "command.error", requestId: command.requestId, payload: {
-        code: error instanceof RuleError ? error.code : "INTERNAL_ERROR",
-        message: error instanceof RuleError ? error.code : "Não foi possível concluir a ação.",
-      } };
-      output.deliveries.push({ connectionId, event: response });
+      response = rejectCommand(error, context, targetRoom);
     }
     // Não sobrescrever a confirmação original caso o ID seja reutilizado incorretamente.
-    if (!cached) {
-      const cache = cacheFor(connectionId);
-      cache.set(command.requestId, { fingerprint, response, createdAt: timestamp });
-      while (cache.size > 50) cache.delete(cache.keys().next().value!);
-    }
+    if (!cached) rememberResponse(connectionId, command.requestId, { fingerprint, response, createdAt: timestamp });
     return output;
   }
 
@@ -439,44 +555,53 @@ export function createRoomService(catalog: Catalog, options: {
     return output;
   }
 
+
+  function closeIfExpired(room: GameRoom, timestamp: number, output: Effects): boolean {
+    if (room.game.finishedAt !== null && timestamp - room.game.finishedAt >= FINISHED_ROOM_MS) {
+      closeRoom(room, "O prazo de exibição da partida terminou.", output);
+      return true;
+    }
+    if (room.emptySince !== null && timestamp - room.emptySince >= EMPTY_ROOM_MS) {
+      closeRoom(room, "A sala foi removida por abandono.", output);
+      return true;
+    }
+    return false;
+  }
+
+  function expireDisconnectedPlayers(room: GameRoom, timestamp: number, output: Effects): void {
+    const expiredIds = [...room.players.values()]
+      .filter(player => !canReconnect(player, timestamp))
+      .map(player => player.id);
+    if (!expiredIds.length) return;
+    const previous = stateSummary(room);
+    const notices = removePlayers(room, expiredIds, timestamp, "reconnect_timeout");
+    const roomActive = rooms.has(room.code);
+    if (roomActive) touch(room, timestamp);
+    logger.info("room.sessions_expired", { roomCode: room.code, removedCount: expiredIds.length,
+      playerCount: room.players.size, version: room.version });
+    if (roomActive) broadcastChange(room, previous, notices, output);
+  }
+
+  function applyDueBotAction(room: GameRoom, timestamp: number, output: Effects): void {
+    const previous = stateSummary(room);
+    const botAction = runDueBotAction(room, catalog, timestamp);
+    if (!botAction) return;
+    touch(room, timestamp);
+    logger.debug("bot.action_applied", { roomCode: room.code, roomMode: room.mode, isBot: true,
+      playerId: botAction.playerId, command: botAction.command, roundId: room.game.round?.id,
+      phase: room.game.phase, version: room.version });
+    broadcastChange(room, previous, botAction.notices, output);
+  }
+
   function maintain(): Effects {
     const output = effects();
     const timestamp = now();
     for (const room of rooms.values()) {
-      if (room.game.finishedAt !== null && timestamp - room.game.finishedAt >= FINISHED_ROOM_MS) {
-        closeRoom(room, "O prazo de exibição da partida terminou.", output);
-        continue;
-      }
-      if (room.emptySince !== null && timestamp - room.emptySince >= EMPTY_ROOM_MS) {
-        closeRoom(room, "A sala foi removida por abandono.", output);
-        continue;
-      }
-      const expiredIds = [...room.players.values()]
-        .filter(p => p.disconnectedAt !== null && timestamp - p.disconnectedAt >= RECONNECT_GRACE_MS)
-        .map(p => p.id);
-      if (expiredIds.length) {
-        const previous = stateSummary(room);
-        const notices = removePlayers(room, expiredIds, timestamp, "reconnect_timeout");
-        touch(room, timestamp);
-        logger.info("room.sessions_expired", { roomCode: room.code, removedCount: expiredIds.length,
-          playerCount: room.players.size, version: room.version });
-        logTransition(room, previous);
-        queueNotices(room, notices, output);
-        queueSnapshots(room, output);
-      }
+      if (closeIfExpired(room, timestamp, output)) continue;
+      expireDisconnectedPlayers(room, timestamp, output);
       if (!rooms.has(room.code)) continue;
       processDue(room, timestamp, output);
-      const previous = stateSummary(room);
-      const botAction = runDueBotAction(room, catalog, timestamp);
-      if (botAction) {
-        touch(room, timestamp);
-        logger.debug("bot.action_applied", { roomCode: room.code, roomMode: room.mode, isBot: true,
-          playerId: botAction.playerId, command: botAction.command, roundId: room.game.round?.id,
-          phase: room.game.phase, version: room.version });
-        logTransition(room, previous);
-        queueNotices(room, botAction.notices, output);
-        queueSnapshots(room, output);
-      }
+      applyDueBotAction(room, timestamp, output);
     }
     return output;
   }

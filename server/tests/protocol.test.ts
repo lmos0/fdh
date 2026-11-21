@@ -34,7 +34,8 @@ describe("validação do protocolo", () => {
   test("rejeita JSON quebrado, mensagens desconhecidas e propriedades extras", () => {
     for (const raw of ["{", "null", "[]", "42", JSON.stringify({ type: "constructor", payload: {}, requestId: "x" }),
       JSON.stringify({ type: "game.start", payload: { playerId: "forged" }, requestId: "x" }),
-      JSON.stringify({ type: "game.start", payload: {}, requestId: "x", playerId: "forged" })]) {
+      JSON.stringify({ type: "game.start", payload: {}, requestId: "x", playerId: "forged" }),
+      JSON.stringify({ type: "connection.pong", payload: { nonce: "n1" }, requestId: "unexpected" })]) {
       expect(() => parseMessage(raw)).toThrow(RuleError);
     }
   });

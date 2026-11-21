@@ -2,7 +2,20 @@ import { resolve, sep } from "node:path";
 import type { CardCatalogView } from "../../shared/protocol";
 import type { Catalog } from "./types";
 import type { Logger } from "../../shared/logging";
-import { logger as defaultLogger } from "./logger";
+import { elapsedMs, logger as defaultLogger } from "./logger";
+
+const CATALOG_CACHE_CONTROL = "public, max-age=60";
+const ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable";
+const INDEX_PATHS = new Set(["/", "/index.html", "/cards", "/cards/"]);
+const ROUTE_LABELS: Record<string, string> = {
+  "/": "/", "/index.html": "/", "/cards": "/cards", "/cards/": "/cards", "/api/cards": "/api/cards", "/health": "/health",
+};
+
+/** Rótulo fixo de rota para logs: nunca registrar a URL completa, query string ou caminhos arbitrários. */
+function routeLabel(pathname: string): string {
+  if (Object.hasOwn(ROUTE_LABELS, pathname)) return ROUTE_LABELS[pathname]!;
+  return pathname.startsWith("/assets/") ? "/assets/*" : "unknown";
+}
 
 const securityHeaders = {
   "X-Content-Type-Options": "nosniff",
@@ -34,13 +47,13 @@ export function createHttpHandler(catalog: Catalog, distDirectory = new URL("../
     }
     if (url.pathname === "/api/cards") {
       return new Response(request.method === "HEAD" ? null : catalogBody, { headers: {
-        ...securityHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "public, max-age=60",
+        ...securityHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": CATALOG_CACHE_CONTROL,
       } });
     }
     let pathname: string;
     try { pathname = decodeURIComponent(url.pathname); }
     catch { return new Response("Caminho inválido", { status: 400, headers: securityHeaders }); }
-    const isIndex = pathname === "/" || pathname === "/index.html" || pathname === "/cards" || pathname === "/cards/";
+    const isIndex = INDEX_PATHS.has(pathname);
     if (!isIndex && !pathname.startsWith("/assets/")) {
       return new Response("Não encontrado", { status: 404, headers: securityHeaders });
     }
@@ -57,22 +70,17 @@ export function createHttpHandler(catalog: Catalog, distDirectory = new URL("../
     return new Response(request.method === "HEAD" ? null : file, { headers: {
       ...securityHeaders,
       "Content-Type": file.type,
-      "Cache-Control": isIndex ? "no-cache" : "public, max-age=31536000, immutable",
+      "Cache-Control": isIndex ? "no-cache" : ASSET_CACHE_CONTROL,
     } });
   }
 
   return async (request: Request): Promise<Response> => {
     const startedAt = performance.now();
-    const pathname = new URL(request.url).pathname;
-    // Nunca registrar URL completa, query string, cabeçalhos ou caminhos arbitrários.
-    const route = pathname === "/" || pathname === "/index.html" ? "/"
-      : pathname === "/cards" || pathname === "/cards/" ? "/cards"
-      : pathname === "/api/cards" || pathname === "/health" ? pathname
-      : pathname.startsWith("/assets/") ? "/assets/*" : "unknown";
+    const route = routeLabel(new URL(request.url).pathname);
     try {
       const response = await handle(request);
       const fields = { method: request.method, route, status: response.status,
-        durationMs: Math.round((performance.now() - startedAt) * 100) / 100 };
+        durationMs: elapsedMs(startedAt) };
       if (response.status >= 500) logger.error("http.response", fields);
       else if (response.status >= 400 && route !== "unknown") logger.warn("http.response", fields);
       else if (route !== "/health") logger.debug("http.response", fields);

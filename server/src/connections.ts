@@ -9,6 +9,28 @@ import { createRoomService } from "./rooms";
 import type { Catalog, Effects } from "./types";
 import { readFeatureFlags } from "./config";
 
+const DEFAULT_PORT = 3000;
+const DEFAULT_MAX_CONNECTIONS = 200;
+const MAX_MESSAGE_BYTES = 8 * 1024;
+const BACKPRESSURE_LIMIT_BYTES = 64 * 1024;
+const IDLE_TIMEOUT_SECONDS = 120;
+const MAINTENANCE_INTERVAL_MS = 1_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_TIMEOUT_MS = 60_000;
+/** Balde de fichas: rajada de 20 mensagens, recarga de uma ficha a cada 100 ms (10/s). */
+const RATE_LIMIT_BURST = 20;
+const RATE_LIMIT_REFILL_MS = 100;
+const MAX_STRIKES = 5;
+const DEV_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+const CLOSE_CODES = {
+  policyViolation: 1008,
+  serviceRestart: 1012,
+  tryAgainLater: 1013,
+  heartbeatTimeout: 4000,
+  sessionReplaced: 4001,
+} as const;
+
 interface ConnectionData {
   id: string;
   closed: boolean;
@@ -36,15 +58,70 @@ export function startServer(options: {
   const service = createRoomService(options.catalog, { logger, botTestModeEnabled: features.botTestMode });
   const sockets = new Map<string, ServerWebSocket<ConnectionData>>();
   const http = createHttpHandler(options.catalog, options.distDirectory, logger);
-  const maxConnections = options.maxConnections ?? 200;
+  const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
 
   function send(socket: ServerWebSocket<ConnectionData>, event: ServerEvent): void {
-    if (!socket.data.closed && socket.readyState === 1) {
-      const result = socket.send(JSON.stringify(event));
-      if (result === -1) logger.debug("connection.backpressure", { connectionId: socket.data.id,
-        messageType: event.type, bufferedBytes: socket.getBufferedAmount() });
-      else if (result === 0) logger.warn("connection.send_failed", { connectionId: socket.data.id, messageType: event.type });
+    if (socket.data.closed || socket.readyState !== WebSocket.OPEN) return;
+    // Bun: -1 indica backpressure (enfileirado), 0 indica que a mensagem foi descartada.
+    const result = socket.send(JSON.stringify(event));
+    if (result === -1) logger.debug("connection.backpressure", { connectionId: socket.data.id,
+      messageType: event.type, bufferedBytes: socket.getBufferedAmount() });
+    else if (result === 0) logger.warn("connection.send_failed", { connectionId: socket.data.id, messageType: event.type });
+  }
+
+  function addStrike(socket: ServerWebSocket<ConnectionData>, closeMessage: string, reason: string): void {
+    socket.data.strikes++;
+    if (socket.data.strikes >= MAX_STRIKES) close(socket, CLOSE_CODES.policyViolation, closeMessage, reason);
+  }
+
+  function consumeRateToken(data: ConnectionData, timestamp: number): boolean {
+    data.tokens = Math.min(RATE_LIMIT_BURST, data.tokens + (timestamp - data.rateAt) / RATE_LIMIT_REFILL_MS);
+    data.rateAt = timestamp;
+    if (data.tokens < 1) return false;
+    data.tokens--;
+    return true;
+  }
+
+  function handlePong(socket: ServerWebSocket<ConnectionData>, nonce: string, timestamp: number): void {
+    const data = socket.data;
+    if (nonce !== data.nonce) {
+      logger.warn("connection.heartbeat_invalid", { connectionId: data.id, strikes: data.strikes + 1 });
+      addStrike(socket, "Heartbeat inválido", "invalid_heartbeat");
+      return;
     }
+    data.lastPongAt = timestamp;
+    data.nonce = null;
+    logger.debug("connection.heartbeat_received", { connectionId: data.id });
+  }
+
+  function rejectMessage(socket: ServerWebSocket<ConnectionData>, raw: string | Buffer, error: unknown): void {
+    const data = socket.data;
+    const ruleError = error instanceof RuleError ? error : null;
+    const fields = { connectionId: data.id, requestId: ruleError?.requestId,
+      errorCode: ruleError?.code ?? "INVALID_MESSAGE", strikes: data.strikes + 1,
+      bytes: typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength };
+    if (ruleError) logger.warn("connection.message_rejected", fields);
+    else logger.error("connection.message_failed", fields, error);
+    send(socket, { type: "command.error", requestId: ruleError?.requestId, payload: {
+      code: ruleError?.code ?? "INVALID_MESSAGE",
+      message: ruleError?.code ?? "Mensagem inválida.",
+    } });
+    addStrike(socket, "Mensagens inválidas", "invalid_messages");
+  }
+
+  function checkHeartbeat(socket: ServerWebSocket<ConnectionData>, timestamp: number): void {
+    const data = socket.data;
+    if (data.closed) return;
+    if (timestamp - data.lastPongAt >= HEARTBEAT_TIMEOUT_MS) {
+      logger.warn("connection.heartbeat_timeout", { connectionId: data.id, durationMs: timestamp - data.lastPongAt });
+      close(socket, CLOSE_CODES.heartbeatTimeout, "Conexão sem resposta", "heartbeat_timeout");
+      return;
+    }
+    if (timestamp - data.lastPingAt < HEARTBEAT_INTERVAL_MS || data.nonce !== null) return;
+    data.nonce = crypto.randomUUID();
+    data.lastPingAt = timestamp;
+    logger.debug("connection.heartbeat_sent", { connectionId: data.id });
+    send(socket, { type: "connection.ping", payload: { nonce: data.nonce } });
   }
 
   function close(socket: ServerWebSocket<ConnectionData>, code: number, message: string, reason: string): void {
@@ -61,7 +138,7 @@ export function startServer(options: {
     }
     for (const id of output.closeConnections) {
       const socket = sockets.get(id);
-      if (socket) close(socket, 4001, "Sessão substituída", "session_replaced");
+      if (socket) close(socket, CLOSE_CODES.sessionReplaced, "Sessão substituída", "session_replaced");
     }
   }
 
@@ -69,12 +146,11 @@ export function startServer(options: {
     const origin = request.headers.get("origin");
     if (!origin) return false;
     if (options.publicOrigin) return origin === options.publicOrigin.replace(/\/$/, "");
-    return origin === new URL(request.url).origin ||
-      origin === "http://localhost:5173" || origin === "http://127.0.0.1:5173";
+    return origin === new URL(request.url).origin || DEV_ORIGINS.includes(origin);
   }
 
   const server = Bun.serve<ConnectionData>({
-    port: options.port ?? 3000,
+    port: options.port ?? DEFAULT_PORT,
     hostname: options.hostname ?? "0.0.0.0",
     fetch(request, server) {
       const url = new URL(request.url);
@@ -90,18 +166,18 @@ export function startServer(options: {
       const timestamp = Date.now();
       if (server.upgrade(request, { data: {
         id: crypto.randomUUID(), closed: false, lastPongAt: timestamp, lastPingAt: timestamp,
-        nonce: null, tokens: 20, rateAt: timestamp, strikes: 0, openedAt: timestamp,
+        nonce: null, tokens: RATE_LIMIT_BURST, rateAt: timestamp, strikes: 0, openedAt: timestamp,
       } })) return;
       logger.warn("connection.upgrade_rejected", { reason: "invalid_handshake", status: 426 });
       return new Response("Upgrade WebSocket necessário", { status: 426 });
     },
     websocket: {
-      maxPayloadLength: 8 * 1024,
-      backpressureLimit: 64 * 1024,
+      maxPayloadLength: MAX_MESSAGE_BYTES,
+      backpressureLimit: BACKPRESSURE_LIMIT_BYTES,
       closeOnBackpressureLimit: true,
-      idleTimeout: 120,
+      idleTimeout: IDLE_TIMEOUT_SECONDS,
       open(socket) {
-        if (sockets.size >= maxConnections) { close(socket, 1013, "Servidor cheio", "capacity"); return; }
+        if (sockets.size >= maxConnections) { close(socket, CLOSE_CODES.tryAgainLater, "Servidor cheio", "capacity"); return; }
         sockets.set(socket.data.id, socket);
         send(socket, { type: "server.config", payload: { features } });
         logger.info("connection.opened", { connectionId: socket.data.id, activeConnections: sockets.size });
@@ -110,41 +186,22 @@ export function startServer(options: {
         if (socket.data.closed) return;
         const timestamp = Date.now();
         const data = socket.data;
-        data.tokens = Math.min(20, data.tokens + (timestamp - data.rateAt) / 100);
-        data.rateAt = timestamp;
-        if (data.tokens < 1) {
+        if (!consumeRateToken(data, timestamp)) {
           logger.warn("connection.rate_limited", { connectionId: data.id, strikes: data.strikes + 1 });
           send(socket, { type: "command.error", payload: { code: "RATE_LIMITED", message: "Muitas mensagens. Aguarde um momento." } });
-          if (++data.strikes >= 5) close(socket, 1008, "Limite de mensagens", "rate_limit");
+          addStrike(socket, "Limite de mensagens", "rate_limit");
           return;
         }
-        data.tokens--;
         try {
           if (typeof raw !== "string") throw new RuleError("INVALID_MESSAGE");
           const message = parseMessage(raw);
           if (message.type === "connection.pong") {
-            if (message.payload.nonce === data.nonce) {
-              data.lastPongAt = timestamp;
-              data.nonce = null;
-              logger.debug("connection.heartbeat_received", { connectionId: data.id });
-            } else {
-              logger.warn("connection.heartbeat_invalid", { connectionId: data.id, strikes: data.strikes + 1 });
-              if (++data.strikes >= 5) close(socket, 1008, "Heartbeat inválido", "invalid_heartbeat");
-            }
+            handlePong(socket, message.payload.nonce, timestamp);
             return;
           }
           dispatch(service.execute(data.id, message));
         } catch (error) {
-          const fields = { connectionId: data.id, requestId: error instanceof RuleError ? error.requestId : undefined,
-            errorCode: error instanceof RuleError ? error.code : "INVALID_MESSAGE", strikes: data.strikes + 1,
-            bytes: typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength };
-          if (error instanceof RuleError) logger.warn("connection.message_rejected", fields);
-          else logger.error("connection.message_failed", fields, error);
-          send(socket, { type: "command.error", requestId: error instanceof RuleError ? error.requestId : undefined, payload: {
-            code: error instanceof RuleError ? error.code : "INVALID_MESSAGE",
-            message: error instanceof RuleError ? error.code : "Mensagem inválida.",
-          } });
-          if (++data.strikes >= 5) close(socket, 1008, "Mensagens inválidas", "invalid_messages");
+          rejectMessage(socket, raw, error);
         }
       },
       close(socket, code) {
@@ -162,21 +219,9 @@ export function startServer(options: {
 
   const maintenance = setInterval(() => {
     const timestamp = Date.now();
-    for (const socket of sockets.values()) {
-      const data = socket.data;
-      if (data.closed) continue;
-      if (timestamp - data.lastPongAt >= 60_000) {
-        logger.warn("connection.heartbeat_timeout", { connectionId: data.id, durationMs: timestamp - data.lastPongAt });
-        close(socket, 4000, "Conexão sem resposta", "heartbeat_timeout");
-      } else if (timestamp - data.lastPingAt >= 30_000 && data.nonce === null) {
-        data.nonce = crypto.randomUUID();
-        data.lastPingAt = timestamp;
-        logger.debug("connection.heartbeat_sent", { connectionId: data.id });
-        send(socket, { type: "connection.ping", payload: { nonce: data.nonce } });
-      }
-    }
+    for (const socket of sockets.values()) checkHeartbeat(socket, timestamp);
     dispatch(service.maintain());
-  }, 1_000);
+  }, MAINTENANCE_INTERVAL_MS);
 
   async function stop(): Promise<void> {
     const startedAt = performance.now();
@@ -186,7 +231,7 @@ export function startServer(options: {
       send(socket, { type: "server.restarting", payload: {
         message: "O servidor está reiniciando. As partidas em memória serão perdidas.",
       } });
-      close(socket, 1012, "Servidor reiniciando", "server_shutdown");
+      close(socket, CLOSE_CODES.serviceRestart, "Servidor reiniciando", "server_shutdown");
     }
     await server.stop(true);
     logger.info("server.stopped", { durationMs: Math.round(performance.now() - startedAt) });

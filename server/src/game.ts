@@ -1,11 +1,21 @@
 import { randomInt } from "node:crypto";
+import { HISTORY_LIMIT, isGameInProgress, MIN_PLAYERS } from "../../shared/protocol";
 import { fillPlayerPlaceholders, hasPlayerPlaceholder } from "../../shared/prompts";
 import { draw, HAND_SIZE, makeDeck, shuffled } from "./cards";
 import { requireRule } from "./errors";
-import type { Catalog, GameNotice, GameRoom, GameState, Player, Round } from "./types";
+import type { Catalog, GameNotice, GameRoom, JudgingOption, Player, Round, GameState } from "./types";
 
+export { HISTORY_LIMIT };
 export const RESULT_DURATION_MS = 15_000;
-export const HISTORY_LIMIT = 30;
+export const MS_PER_SECOND = 1_000;
+const NICKNAME_LOCALE = "pt-BR";
+
+type TimedPhase = "submitting" | "judging";
+
+const EXPIRED_ROUND_REASONS = {
+  submitting: "O prazo acabou sem respostas. Rodada cancelada, sem pontos; o juiz muda.",
+  judging: "O juiz não escolheu dentro do prazo. Rodada cancelada, sem pontos; o juiz muda.",
+} as const satisfies Record<TimedPhase, string>;
 
 export function initialGame(): GameState {
   return {
@@ -16,37 +26,72 @@ export function initialGame(): GameState {
   };
 }
 
+function isTimedPhase(phase: GameState["phase"]): phase is TimedPhase {
+  return phase === "submitting" || phase === "judging";
+}
+
+export function everyoneConnected(room: GameRoom): boolean {
+  return [...room.players.values()].every(player => player.disconnectedAt === null);
+}
+
+export function hasConnectedHuman(room: GameRoom): boolean {
+  return [...room.players.values()].some(player => !player.isBot && player.disconnectedAt === null);
+}
+
+export function isNicknameTaken(room: GameRoom, nickname: string): boolean {
+  const normalized = nickname.toLocaleLowerCase(NICKNAME_LOCALE);
+  return [...room.players.values()].some(player => player.nickname.toLocaleLowerCase(NICKNAME_LOCALE) === normalized);
+}
+
+export function requireHost(room: GameRoom, player: Player): void {
+  requireRule(room.hostPlayerId === player.id, "NOT_HOST");
+}
+
 export function isPaused(room: GameRoom): boolean {
-  return room.game.phase !== "lobby" && room.game.phase !== "finished" &&
-    (room.game.collectivelyPaused || [...room.players.values()].some(player => player.disconnectedAt !== null));
+  if (!isGameInProgress(room.game.phase)) return false;
+  return room.game.collectivelyPaused || !everyoneConnected(room);
 }
 
 export function syncClocks(room: GameRoom, now: number): void {
   const round = room.game.round;
   if (!round) return;
-  if (room.game.phase === "submitting" || room.game.phase === "judging") {
-    if (isPaused(room) && round.deadlineAt !== null) {
-      round.remainingPhaseMs = Math.max(0, round.deadlineAt - now);
-      round.deadlineAt = null;
-    } else if (!isPaused(room) && round.deadlineAt === null && round.remainingPhaseMs !== null) {
-      round.deadlineAt = now + round.remainingPhaseMs;
-      round.remainingPhaseMs = null;
-    }
+  const paused = isPaused(room);
+  if (isTimedPhase(room.game.phase)) syncPhaseClock(round, paused, now);
+  if (room.game.phase === "round_result") syncResultClock(round, paused, now);
+}
+
+/** Na pausa, o prazo absoluto vira tempo restante; ao retomar, o restante vira prazo de novo. */
+function syncPhaseClock(round: Round, paused: boolean, now: number): void {
+  if (paused && round.deadlineAt !== null) {
+    round.remainingPhaseMs = Math.max(0, round.deadlineAt - now);
+    round.deadlineAt = null;
+    return;
   }
-  if (room.game.phase !== "round_result") return;
-  if (isPaused(room) && round.nextRoundAt !== null) {
+  if (!paused && round.deadlineAt === null && round.remainingPhaseMs !== null) {
+    round.deadlineAt = now + round.remainingPhaseMs;
+    round.remainingPhaseMs = null;
+  }
+}
+
+function syncResultClock(round: Round, paused: boolean, now: number): void {
+  if (paused && round.nextRoundAt !== null) {
     round.remainingResultMs = Math.max(0, round.nextRoundAt - now);
     round.nextRoundAt = null;
-  } else if (!isPaused(room) && round.nextRoundAt === null && round.remainingResultMs !== null) {
+    return;
+  }
+  if (!paused && round.nextRoundAt === null && round.remainingResultMs !== null) {
     round.nextRoundAt = now + round.remainingResultMs;
     round.remainingResultMs = null;
   }
 }
 
-function startPhaseClock(room: GameRoom, now: number): void {
-  const round = room.game.round!;
+function secondsToMs(seconds: number | null): number | null {
+  return seconds === null ? null : seconds * MS_PER_SECOND;
+}
+
+function startPhaseClock(room: GameRoom, round: Round, now: number): void {
   round.deadlineAt = null;
-  round.remainingPhaseMs = room.settings.phaseTimeLimitSeconds === null ? null : room.settings.phaseTimeLimitSeconds * 1_000;
+  round.remainingPhaseMs = secondsToMs(room.settings.phaseTimeLimitSeconds);
   syncClocks(room, now);
 }
 
@@ -69,50 +114,60 @@ function nextJudge(room: GameRoom, previousId: string): string {
   throw new Error("Não há juiz disponível.");
 }
 
+function dealExtraCards(room: GameRoom, judgePlayerId: string, count: number): void {
+  for (const player of room.players.values()) {
+    if (player.id === judgePlayerId) continue;
+    for (let extra = 0; extra < count; extra++) player.hand.push(draw(room.game.responseDeck));
+  }
+}
+
+function resolvePromptText(room: GameRoom, text: string): string {
+  if (!hasPlayerPlaceholder(text)) return text;
+  return fillPlayerPlaceholders(text, shuffled([...room.players.values()]).map(player => player.nickname));
+}
+
 function beginRound(room: GameRoom, judgePlayerId: string, catalog: Catalog, now: number): void {
   replenish(room);
   const promptCardId = draw(room.game.promptDeck);
-  const prompt = catalog.cards.get(promptCardId)!;
-  if (prompt.kind !== "prompt") throw new Error("Carta de pergunta inválida.");
-  for (const player of room.players.values()) {
-    if (player.id !== judgePlayerId) {
-      for (let extra = 0; extra < prompt.draw; extra++) player.hand.push(draw(room.game.responseDeck));
-    }
-  }
-  const promptText = hasPlayerPlaceholder(prompt.text)
-    ? fillPlayerPlaceholders(prompt.text, shuffled([...room.players.values()]).map(player => player.nickname))
-    : prompt.text;
-  const number = (room.game.round?.number ?? 0) + 1;
-  room.game.round = {
-    id: crypto.randomUUID(), number, judgePlayerId,
-    promptCardId, promptText, pick: prompt.pick, draw: prompt.draw,
+  const prompt = catalog.cards.get(promptCardId);
+  if (prompt?.kind !== "prompt") throw new Error("Carta de pergunta inválida.");
+  dealExtraCards(room, judgePlayerId, prompt.draw);
+  const round: Round = {
+    id: crypto.randomUUID(), number: (room.game.round?.number ?? 0) + 1, judgePlayerId,
+    promptCardId, promptText: resolvePromptText(room, prompt.text), pick: prompt.pick, draw: prompt.draw,
     respondentPlayerIds: [...room.players.keys()].filter(id => id !== judgePlayerId),
     submissions: new Map(), options: [], result: null, cardsSettled: false,
     nextRoundAt: null, remainingResultMs: null,
     deadlineAt: null, remainingPhaseMs: null,
   };
+  room.game.round = round;
   room.game.phase = "submitting";
-  startPhaseClock(room, now);
+  startPhaseClock(room, round, now);
+}
+
+function validateCanStart(room: GameRoom): void {
+  requireRule(room.players.size >= MIN_PLAYERS, "NOT_ENOUGH_PLAYERS");
+  requireRule(everyoneConnected(room), "PLAYERS_DISCONNECTED");
+}
+
+function firstJudge(room: GameRoom): Player {
+  const players = [...room.players.values()];
+  // No teste, começar como juiz garante que a pessoa veja os dois papéis no rodízio.
+  if (room.mode === "test") return players.find(player => !player.isBot)!;
+  return players[randomInt(players.length)]!;
 }
 
 export function startGame(room: GameRoom, catalog: Catalog, now: number): void {
   requireRule(room.game.phase === "lobby", "INVALID_PHASE");
-  requireRule(room.players.size >= 3, "NOT_ENOUGH_PLAYERS");
-  requireRule([...room.players.values()].every(p => p.disconnectedAt === null), "PLAYERS_DISCONNECTED");
+  validateCanStart(room);
   room.game.promptDeck = makeDeck(catalog.promptIds);
   room.game.responseDeck = makeDeck(catalog.responseIds);
-  const players = [...room.players.values()];
-  // No teste, começar como juiz garante que a pessoa veja os dois papéis no rodízio.
-  const judge = room.mode === "test" ? players.find(player => !player.isBot)! : players[randomInt(players.length)]!;
-  beginRound(room, judge.id, catalog, now);
+  beginRound(room, firstJudge(room).id, catalog, now);
 }
 
 export function restartGame(room: GameRoom, catalog: Catalog, now: number, toLobby = false): void {
   requireRule(room.game.phase === "finished", "INVALID_PHASE");
-  if (!toLobby) {
-    requireRule(room.players.size >= 3, "NOT_ENOUGH_PLAYERS");
-    requireRule([...room.players.values()].every(p => p.disconnectedAt === null), "PLAYERS_DISCONNECTED");
-  }
+  if (!toLobby) validateCanStart(room);
   for (const player of room.players.values()) {
     player.score = 0;
     player.hand = [];
@@ -120,57 +175,63 @@ export function restartGame(room: GameRoom, catalog: Catalog, now: number, toLob
   room.playerOrder = room.playerOrder.filter(id => room.players.has(id));
   room.pendingBotAction = null;
   room.game = initialGame();
-  if (!toLobby) {
-    startGame(room, catalog, now);
-  }
+  if (toLobby) return;
+  startGame(room, catalog, now);
 }
 
-function activeRound(room: GameRoom, roundId: string, phase: "submitting" | "judging"): Round {
+function activeRound(room: GameRoom, roundId: string, phase: TimedPhase): Round {
   requireRule(room.game.round?.id === roundId, "STALE_ROUND");
   requireRule(room.game.phase === phase, "INVALID_PHASE");
   requireRule(!isPaused(room), "GAME_PAUSED");
   return room.game.round;
 }
 
-export function submitCards(room: GameRoom, player: Player, roundId: string, cardIds: string[], now: number): void {
-  const round = activeRound(room, roundId, "submitting");
+function validateSubmission(round: Round, player: Player, cardIds: string[]): void {
   requireRule(player.id !== round.judgePlayerId, "JUDGE_CANNOT_SUBMIT");
   requireRule(!round.submissions.has(player.id), "ALREADY_SUBMITTED");
   requireRule(round.respondentPlayerIds.includes(player.id), "INVALID_PHASE");
   requireRule(cardIds.length === round.pick, "INVALID_CARD_COUNT");
   requireRule(new Set(cardIds).size === cardIds.length, "DUPLICATE_CARDS");
   requireRule(cardIds.every(id => player.hand.includes(id)), "CARD_NOT_IN_HAND");
+}
+
+export function submitCards(room: GameRoom, player: Player, roundId: string, cardIds: string[], now: number): void {
+  const round = activeRound(room, roundId, "submitting");
   // Validar a combinação inteira antes de remover qualquer carta; preservar a ordem escolhida.
+  validateSubmission(round, player, cardIds);
   player.hand = player.hand.filter(id => !cardIds.includes(id));
   round.submissions.set(player.id, { playerId: player.id, cardIds: [...cardIds] });
   if (round.submissions.size === round.respondentPlayerIds.length) {
-    beginJudging(room, now);
+    beginJudging(room, round, now);
   }
 }
 
-function beginJudging(room: GameRoom, now: number): void {
-  const round = room.game.round!;
+function beginJudging(room: GameRoom, round: Round, now: number): void {
   round.options = shuffled([...round.submissions.values()])
     .map(submission => ({ ...submission, id: crypto.randomUUID() }));
   room.game.phase = "judging";
-  startPhaseClock(room, now);
+  startPhaseClock(room, round, now);
+}
+
+function expiredPhase(room: GameRoom, now: number): TimedPhase | null {
+  const { phase, round } = room.game;
+  if (!isTimedPhase(phase) || !round || round.deadlineAt === null) return null;
+  if (isPaused(room) || now < round.deadlineAt) return null;
+  return phase;
 }
 
 /** Uma única transição por chamada; a fase seguinte recebe seu prazo completo. */
 export function expirePhase(room: GameRoom, catalog: Catalog, now: number): GameNotice[] | null {
+  const phase = expiredPhase(room, now);
   const round = room.game.round;
-  if (isPaused(room) || !round || round.deadlineAt === null || now < round.deadlineAt ||
-      (room.game.phase !== "submitting" && room.game.phase !== "judging")) return null;
-  if (room.game.phase === "submitting" && round.submissions.size > 0) {
-    beginJudging(room, now);
+  if (!phase || !round) return null;
+  if (phase === "submitting" && round.submissions.size > 0) {
+    beginJudging(room, round, now);
     return [];
   }
-  const reason = room.game.phase === "submitting"
-    ? "O prazo acabou sem respostas. Rodada cancelada, sem pontos; o juiz muda."
-    : "O juiz não escolheu dentro do prazo. Rodada cancelada, sem pontos; o juiz muda.";
   settleCards(room);
   advanceRound(room, catalog, now);
-  return [{ type: "round.cancelled", payload: { roundId: round.id, reason } }];
+  return [{ type: "round.cancelled", payload: { roundId: round.id, reason: EXPIRED_ROUND_REASONS[phase] } }];
 }
 
 function settleCards(room: GameRoom): void {
@@ -192,27 +253,40 @@ export function judgeRound(
   requireRule(option, "OPTION_NOT_FOUND");
   const winner = room.players.get(option.playerId)!;
   winner.score++;
-  round.result = {
-    roundId: round.id, winnerPlayerId: winner.id, winnerNickname: winner.nickname,
-    winningOptionId: option.id, responseTexts: option.cardIds.map(id => catalog.cards.get(id)!.text),
-    scores: [...room.players.values()].map(p => ({ playerId: p.id, nickname: p.nickname, score: p.score })),
-  };
-  room.game.history.push({ roundNumber: round.number,
-    prompt: { id: round.promptCardId, text: round.promptText, pick: round.pick, draw: round.draw }, result: structuredClone(round.result) });
-  if (room.game.history.length > HISTORY_LIMIT) room.game.history.shift();
+  const result = recordResult(room, round, winner, option, catalog);
   settleCards(room);
   round.deadlineAt = null;
   round.remainingPhaseMs = null;
-  if (winner.score >= room.settings.targetScore) {
-    room.game.phase = "finished";
-    room.game.winnerPlayerId = winner.id;
-    room.game.finishReason = "target_reached";
-    room.game.finishedAt = now;
-  } else {
-    room.game.phase = "round_result";
-    round.nextRoundAt = room.settings.resultIntervalSeconds === null ? null : now + room.settings.resultIntervalSeconds * 1_000;
-  }
-  return { type: "round.result", payload: round.result };
+  if (winner.score >= room.settings.targetScore) finishByTarget(room, winner, now);
+  else showRoundResult(room, round, now);
+  return { type: "round.result", payload: result };
+}
+
+function recordResult(room: GameRoom, round: Round, winner: Player, option: JudgingOption, catalog: Catalog) {
+  const result = {
+    roundId: round.id, winnerPlayerId: winner.id, winnerNickname: winner.nickname,
+    winningOptionId: option.id, responseTexts: option.cardIds.map(id => catalog.cards.get(id)!.text),
+    scores: [...room.players.values()].map(player => ({ playerId: player.id, nickname: player.nickname, score: player.score })),
+  };
+  round.result = result;
+  room.game.history.push({ roundNumber: round.number,
+    prompt: { id: round.promptCardId, text: round.promptText, pick: round.pick, draw: round.draw },
+    result: structuredClone(result) });
+  if (room.game.history.length > HISTORY_LIMIT) room.game.history.shift();
+  return result;
+}
+
+function finishByTarget(room: GameRoom, winner: Player, now: number): void {
+  room.game.phase = "finished";
+  room.game.winnerPlayerId = winner.id;
+  room.game.finishReason = "target_reached";
+  room.game.finishedAt = now;
+}
+
+function showRoundResult(room: GameRoom, round: Round, now: number): void {
+  room.game.phase = "round_result";
+  const intervalMs = secondsToMs(room.settings.resultIntervalSeconds);
+  round.nextRoundAt = intervalMs === null ? null : now + intervalMs;
 }
 
 export function advanceRound(room: GameRoom, catalog: Catalog, now: number): void {
@@ -221,24 +295,31 @@ export function advanceRound(room: GameRoom, catalog: Catalog, now: number): voi
 
 // Chamado uma vez para todo o lote de participantes removidos na mesma manutenção.
 export function handleDepartures(room: GameRoom, now: number, catalog: Catalog): GameNotice[] {
-  if (room.game.phase === "lobby" || room.game.phase === "finished") return [];
-  const notices: GameNotice[] = [];
-  const active = room.game.phase === "submitting" || room.game.phase === "judging";
-  if (active && room.game.round) {
-    notices.push({ type: "round.cancelled", payload: {
-      roundId: room.game.round.id,
-      reason: "Um participante saiu. A rodada foi cancelada, sem pontos.",
-    } });
-    settleCards(room);
-  }
-  if (room.players.size < 3) {
-    room.game.phase = "finished";
-    room.game.finishReason = "not_enough_players";
-    room.game.finishedAt = now;
-    if (active) room.game.round = null;
+  if (!isGameInProgress(room.game.phase)) return [];
+  const active = isTimedPhase(room.game.phase);
+  const notices = active ? cancelActiveRound(room) : [];
+  if (room.players.size < MIN_PLAYERS) {
+    finishForLackOfPlayers(room, active, now);
   } else if (active) {
     advanceRound(room, catalog, now);
   }
   syncClocks(room, now);
   return notices;
+}
+
+function cancelActiveRound(room: GameRoom): GameNotice[] {
+  const round = room.game.round;
+  if (!round) return [];
+  settleCards(room);
+  return [{ type: "round.cancelled", payload: {
+    roundId: round.id,
+    reason: "Um participante saiu. A rodada foi cancelada, sem pontos.",
+  } }];
+}
+
+function finishForLackOfPlayers(room: GameRoom, roundWasActive: boolean, now: number): void {
+  room.game.phase = "finished";
+  room.game.finishReason = "not_enough_players";
+  room.game.finishedAt = now;
+  if (roundWasActive) room.game.round = null;
 }

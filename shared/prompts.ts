@@ -20,7 +20,6 @@ export function fillPlayerPlaceholders(text: string, nicknames: readonly string[
   return text.replace(PLAYER_PLACEHOLDER_PATTERN, () => escapeBlanks(nicknames[index++ % nicknames.length]!));
 }
 
-/** Texto legível para o catálogo público de cartas (fora de uma sala). */
 export function formatCatalogPrompt(text: string): string {
   return text.replace(PLAYER_PLACEHOLDER_PATTERN, PLAYER_PLACEHOLDER_LABEL);
 }

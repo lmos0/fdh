@@ -18,7 +18,6 @@ export interface SceneBuilders {
   textures: TextureBundle;
 }
 
-/** Cozy warm dining-room studio environment fed into PMREM for photorealistic reflections. */
 export function buildEnvScene() {
   const env = new T.Scene();
   env.background = new T.Color("#322620");
@@ -34,13 +33,9 @@ export function buildEnvScene() {
 
   // Off-axis overhead warm pendant diffuser (creates rich curved reflections without glaring flat cards overhead)
   panel("#ffe8c6", 3.6, [-2.8, 5.4, -2.4], [4.2, 3.0], [Math.PI / 2, 0, 0]);
-  // Soft warm ceiling bounce
   panel("#f4ca98", 1.1, [0, 5.8, 0], [12, 12], [Math.PI / 2, 0, 0]);
-  // Cool kitchen-window twilight highlight on right-front
   panel("#c6e4ff", 2.9, [6.5, 2.4, 3.5], [3.6, 4.2], [0, -Math.PI * 0.62, 0]);
-  // Warm side wall bounce on left
   panel("#ebaf76", 1.5, [-6.8, 1.8, -1.5], [5.5, 3.5], [0, Math.PI / 2, 0]);
-  // Subtle warm floor bounce
   panel("#6b422a", 0.85, [0, -3.5, 0], [14, 14], [-Math.PI / 2, 0, 0]);
 
   return env;
@@ -91,7 +86,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     return m;
   }
 
-  // --- 1. Glazed terracotta kitchen floor (≈ 29 cm tiles) ---
   const floorMat = own(new T.MeshStandardMaterial({
     map: textures.tiles.map,
     color: "#a8978a",
@@ -108,7 +102,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // --- 2. Woven kilim rug, 3.0 × 2.0 m, 1 cm thick, with braided fringe ---
   const rugMat = own(new T.MeshStandardMaterial({
     map: textures.rug.map,
     bumpMap: textures.rug.bump,
@@ -134,7 +127,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     }
   }
 
-  // --- 3. Varnished oak top (4 cm), painted apron and turned legs ---
   const tabletopMat = own(new T.MeshPhysicalMaterial({
     map: textures.wood.map,
     color: "#e6d3bf",
@@ -192,12 +184,10 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
       addContactShadow(scene, plane, shadowMatSoft, x, FLOOR + 0.11, z, 1.4, 1.4);
     }
   }
-  // Broad soft ambient occlusion under the table, on top of the rug
   addContactShadow(scene, plane, shadowMatTable, 0, FLOOR + 0.105, 0, 25, 14);
 
   // --- 4. Kitchen Props (All carefully positioned outside the card play zone) ---
 
-  // 4a. Softly Draped Folded Gingham Kitchen Towel
   const towelGroup = new T.Group();
   towelGroup.position.set(-7.9, TOP, -2.3);
   towelGroup.rotation.y = 0.15;
@@ -219,7 +209,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     for (let i = 0; i < p.count; i++) {
       const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i);
       const nx = vx / (w * 0.5), nz = vz / (d * 0.5);
-      // Soft pillowed rounding on edges + natural organic linen drape wave
       const edge = Math.max(0, 1 - Math.max(Math.abs(nx), Math.abs(nz)) * 0.85);
       const wave = (Math.sin(vx * 4.2 + seed) * 0.004 + Math.cos(vz * 5.4 + seed * 1.7) * 0.003) * (vy > 0 ? 1 : 0.25);
       const tuck = vy > 0 ? -0.006 * (nx * nx + nz * nz) * 0.5 : 0;
@@ -233,7 +222,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   mesh(towelGroup, makeFoldedCloth(1.5, 0.58, 0.024, 3.2), towelMat, 0.025, 0.038, -0.28);
   addContactShadow(towelGroup, plane, shadowMatSoft, 0.02, 0.002, 0.02, 1.75, 1.32);
 
-  // 4b. Artisan Speckled Ceramic Coffee Mug with Espresso Crema
   const mug = new T.Group();
   mug.position.set(-8.05, TOP + 0.085, -2.35);
   mug.rotation.y = 0.56;
@@ -260,13 +248,11 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     [0.284, 0.445], [0.274, 0.468], [0.254, 0.468], [0.246, 0.44], [0.236, 0.05], [0, 0.045],
   ], 48);
   mesh(mug, mugLipGeo, mugOuterMat, 0, 0, 0);
-  // Subtle warm cream glaze lining inside upper bowl
   const innerWallGeo = shape(new T.CylinderGeometry(0.247, 0.238, 0.13, 40, 1, true));
   const innerWall = new T.Mesh(innerWallGeo, mugInnerMat);
   innerWall.position.y = 0.39;
   mug.add(innerWall);
 
-  // Smooth organic C-handle seamlessly fused to mug body
   const handleCurve = new T.CatmullRomCurve3([
     new T.Vector3(-0.24, 0.37, 0),
     new T.Vector3(-0.37, 0.38, 0),
@@ -276,7 +262,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   ]);
   mesh(mug, shape(new T.TubeGeometry(handleCurve, 28, 0.036, 14, false)), mugOuterMat, 0, 0, 0);
 
-  // Glossy espresso with golden crema ring
   const coffeeMat = own(new T.MeshPhysicalMaterial({
     map: textures.coffee,
     roughness: 0.1,
@@ -291,7 +276,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   mug.add(coffeeDisc);
   addContactShadow(mug, plane, shadowMatSoft, 0.02, 0.002, 0.02, 0.72, 0.72);
 
-  // 4c. Stoneware Plate & Sculpted Wood-Fired Pizza Slice
   const plate = new T.Group();
   plate.position.set(8.1, TOP, -2.15);
   plate.rotation.y = 0.3;
@@ -310,13 +294,11 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     [0, 0.005], [0.41, 0.005], [0.46, 0.022], [0.58, 0.065], [0.64, 0.088],
     [0.648, 0.098], [0.632, 0.104], [0.56, 0.075], [0.44, 0.036], [0, 0.032],
   ], 56), plateMat, 0, 0, 0);
-  // Hand-painted terracotta rim band
   const rimBand = mesh(plate, shape(new T.TorusGeometry(0.59, 0.008, 8, 64)),
     own(new T.MeshPhysicalMaterial({ color: "#c96f55", roughness: 0.28, clearcoat: 0.7 })), 0, 0.084, 0);
   rimBand.rotation.x = Math.PI / 2;
   addContactShadow(plate, plane, shadowMatSoft, 0.02, 0.003, 0.02, 1.45, 1.45);
 
-  // Sculpted pizza slice
   const pizza = new T.Group();
   pizza.position.set(0.02, 0.038, 0.02);
   pizza.rotation.y = -0.44;
@@ -353,7 +335,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   const sliceMesh = mesh(pizza, sliceGeo, cheeseMat, 0, 0.006, 0);
   sliceMesh.rotation.x = -Math.PI / 2;
 
-  // Curved puffy wood-fired cornicione crust along the back arc
   const crustCurve = new T.CatmullRomCurve3([
     new T.Vector3(-0.39, 0.048, 0.25),
     new T.Vector3(-0.20, 0.056, 0.34),
@@ -394,7 +375,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     rim.rotation.x = Math.PI / 2;
   }
 
-  // Sculpted curved fresh basil leaves
   const leafShape = new T.Shape();
   leafShape.moveTo(0, -0.042);
   leafShape.quadraticCurveTo(0.035, -0.01, 0.026, 0.026);
@@ -418,7 +398,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     leaf.rotation.set(-Math.PI / 2 + 0.14, rot, 0.08);
   }
 
-  // 4d. Pressed Cork Coaster & Crystal-Clear Pub Glass with Amber Drink + Creamy Foam
   const drink = new T.Group();
   drink.position.set(8.75, TOP, 3.2);
   // 9 cm tumbler on a 10 cm cork coaster
@@ -434,7 +413,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   mesh(drink, shape(new T.CylinderGeometry(0.28, 0.285, 0.018, 40)), corkMat, 0, 0.009, 0);
   addContactShadow(drink, plane, shadowMatSoft, 0.015, 0.002, 0.015, 0.68, 0.68);
 
-  // Amber liquid core (warm backlit depth)
   const amberMat = own(new T.MeshPhysicalMaterial({
     color: "#d97a16",
     emissive: "#5c2604",
@@ -457,7 +435,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
     [0, 0.382], [0.189, 0.382], [0.193, 0.422], [0.175, 0.445], [0.11, 0.455], [0, 0.46],
   ], 36), foamMat, 0, 0.018, 0);
 
-  // Thick-bottomed crystal-clear glass shell catching warm pendant & cool window reflections
   const glassMat = own(new T.MeshPhysicalMaterial({
     color: "#f2faff",
     roughness: 0.04,
@@ -479,7 +456,6 @@ export function buildRoomAndTable(scene: T.Scene, b: SceneBuilders) {
   shell.castShadow = false;
   shell.renderOrder = 3;
 
-  // Heavy refractive glass base disc highlight
   const glassBaseMat = own(new T.MeshPhysicalMaterial({
     color: "#ffffff",
     roughness: 0.06,
@@ -565,12 +541,10 @@ export function createSeatKit(
     return m;
   }
 
-  /** Handcrafted wooden dining chair with turned spindles, curved crest rail and woven linen cushion. */
   function chair(color: string) {
     const c = new T.Group();
     const { cushion, crest } = paint(color);
 
-    // Tapered legs + side stretchers
     for (const x of [-0.34, 0.34]) {
       for (const z of [-0.3, 0.3]) add(c, legGeo, mahoganyMat, x, 0.425, z);
       const st = add(c, stretcherGeo, mahoganyMat, x, 0.28, 0);
@@ -579,11 +553,9 @@ export function createSeatKit(
     const cross = add(c, stretcherGeo, mahoganyMat, 0, 0.28, 0.3);
     cross.rotation.z = Math.PI / 2;
 
-    // Seat base & upholstered woven linen cushion
     add(c, seatBaseGeo, mahoganyMat, 0, 0.86, 0);
     add(c, cushionGeo, cushion, 0, 0.935, -0.02);
 
-    // Backrest posts, turned spindles & accent painted top crest rail
     for (const x of [-0.34, 0.34]) {
       const post = add(c, postGeo, mahoganyMat, x, 1.37, 0.34);
       post.rotation.x = 0.04;
@@ -604,31 +576,25 @@ export function createSeatKit(
     return c;
   }
 
-  /** Polished mahogany & brushed-brass judge's gavel and sounding block. */
   function gavel() {
     const g = new T.Group();
 
-    // Turned mahogany sounding block with inset brass ring
     add(g, blockGeo, mahoganyMat, 0, 0, 0);
     const inlay = add(g, inlayGeo, brassMat, 0, 0.072, 0);
     inlay.rotation.x = Math.PI / 2;
 
-    // Mallet resting proudly across the sounding block
     const mallet = new T.Group();
     mallet.position.set(0.06, 0.165, 0.02);
     mallet.rotation.z = 0.1;
     g.add(mallet);
 
-    // Ergonomic turned handle
     const handle = add(mallet, handleGeo, mahoganyMat, 0.02, 0, 0);
     handle.rotation.z = -Math.PI / 2;
 
-    // Brass collar where handle meets head
     const collar = add(mallet, collarGeo, brassMat, 0.04, 0, 0);
     collar.rotation.z = Math.PI / 2;
     collar.castShadow = collar.receiveShadow = false;
 
-    // Contoured mahogany barrel head + gleaming brushed-brass bands
     const head = add(mallet, headGeo, mahoganyMat, -0.06, 0, 0);
     head.rotation.x = Math.PI / 2;
 

@@ -87,7 +87,6 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
     : ranking.map(p => ({ playerId: p.id, nickname: p.nickname, score: p.score }))).sort((a, b) => b.score - a.score);
   const slotCards = selection.slots.map(id => self.hand.find(card => card.id === id) ?? null);
   const submittedTexts = self.submittedResponses.map(card => card.text);
-  // As lacunas da pergunta acompanham o que está em jogo para quem vê a tela.
   const promptAnswers: (string | null)[] = result ? result.responseTexts
     : room.phase === "submitting" && !isJudge ? self.submitted ? submittedTexts : slotCards.map(card => card?.text ?? null)
     : room.phase === "judging" && isJudge ? round?.options.find(option => option.id === selectedOption)?.responses ?? []

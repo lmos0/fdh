@@ -3,7 +3,6 @@ import type { CardView, PromptView } from "../../../shared/protocol";
 import { ResponseList } from "./AnswerOptions";
 import { FilledPrompt } from "./FilledPrompt";
 
-/** Único lugar da combinação: espaços em ordem, edição do espaço ativo e envio. */
 export function SubmissionBar({ prompt, slots, activeIndex, activate, move, remove, locked, clear, submit, onHeight, clock }: {
   prompt: PromptView; slots: (CardView | null)[]; activeIndex: number; locked: boolean;
   activate: (index: number) => void; move: (direction: -1 | 1) => void; remove: () => void;

@@ -68,7 +68,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   function shape<G extends T.BufferGeometry>(g: G) { geometries.add(g); return g; }
   function trackTex<X extends T.Texture>(t: X) { textures.add(t); return t; }
 
-  // --- Warm dining-room environment for reflections ---
   const pmrem = new T.PMREMGenerator(renderer);
   const envScene = buildEnvScene();
   const envMap = pmrem.fromScene(envScene, 0.045).texture;
@@ -83,7 +82,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   scene.environment = envMap;
   scene.environmentIntensity = 0.32;
 
-  // --- Lighting: one warm pendant over the table, its pool of light fading into the room ---
   const hemi = new T.HemisphereLight(0xffeedc, 0x3a261c, 0.26);
   const lamp = new T.SpotLight(0xffdcae, 1750, 0, 0.56, 1, 2);
   lamp.position.set(-1.2, 17, 1.2);
@@ -102,13 +100,11 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   warmBack.position.set(-20, 9, -16);
   scene.add(hemi, lamp, lamp.target, rim, warmBack);
 
-  // --- Room, table and props ---
   const tex = createTextureBundle(anisotropy, trackTex);
   const builders = { shape, own, solid, textures: tex };
   const { plane, mahoganyMat, brassMat, shadowMatSoft } = buildRoomAndTable(scene, builders);
   const seatKit = createSeatKit(builders, mahoganyMat, brassMat, plane, shadowMatSoft);
 
-  // --- Cards: two printed sheets with die-cut corners (alphaTest), bowed like real cardstock ---
   function bow(g: T.BufferGeometry) {
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
@@ -166,7 +162,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     return covers.get(key)!.mat;
   }
 
-  // --- Draw piles: a striated block of stacked cards with a couple of loose cards on top ---
   const outline = new T.Shape();
   const r = 0.045, hw = CW / 2, hh = CH / 2;
   outline.moveTo(-hw + r, -hh);
@@ -218,7 +213,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   const whiteTop = deck(WHITE_DECK, reverseMat, deckEdgeWhite, 7);
   const blackTop = deck(BLACK_DECK, promptReverseMat, deckEdgeBlack, 11);
 
-  // --- Walnut card rack in front of the local seat and a little easel for the prompt ---
   function block(parent: T.Object3D, w: number, h: number, d: number, at: T.Vector3, tiltX = 0) {
     const m = new T.Mesh(shape(new RoundedBoxGeometry(w, h, d, 2, Math.min(h, d) * 0.3)), mahoganyMat);
     m.position.copy(at);
@@ -243,7 +237,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   stand(RACK_Z, RACK.length, RACK, 0.3);
   stand(PROMPT_Z, 1.3, EASEL, 0.7);
 
-  // --- Seats: chairs, folded place cards with the name on both faces and the judge's gavel ---
   const seatGroup = new T.Group();
   scene.add(seatGroup);
   const seatTextures: T.Texture[] = [], seatMaterials: T.Material[] = [];
@@ -361,7 +354,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     return true;
   }
 
-  // --- Card pieces, camera and the on-demand render loop ---
   interface Piece {
     group: T.Group;
     face: T.Mesh;
@@ -603,7 +595,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       }
     }
 
-    // A new prompt is drawn from the black deck and turned over in the middle of the table.
     const easelAt = leanUp(EASEL.lean).multiplyScalar(CH / 2).addScaledVector(leanOut(EASEL.lean), 0.004)
       .add(new T.Vector3(0, TOP + EASEL.seat, PROMPT_Z + EASEL.front));
     card("prompt:" + model.prompt, model.prompt, model.imprint, "black", easelAt.x, easelAt.y, easelAt.z,
@@ -622,7 +613,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       for (const [, p] of rest) p.leaving = landing;
     }
 
-    // Answers arrive face down in a loose pile.
     for (let i = 0; i < model.backs; i++) {
       const j = seeded(101 + i * 13);
       card("back" + i, "", "", "back", PILE.x + (j() - 0.5) * 0.3, LAY + i * 0.016, PILE.z + (j() - 0.5) * 0.24,
@@ -631,7 +621,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
 
     const n = model.cards.length;
     if (model.zone === "hand") {
-      // The hand stands side by side in the rack; chosen cards are pulled up out of it.
       const pitch = Math.min(CW + 0.1, (RACK.length - CW - 0.3) / Math.max(n - 1, 1));
       const up = leanUp(RACK.lean), out = leanOut(RACK.lean);
       model.cards.forEach((c, i) => {
@@ -643,7 +632,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
         });
       });
     } else {
-      // Played combinations sit in a row; the one the judge inspects is lifted and tipped up to be read.
       const pitch = Math.min(CW + 0.3, 7.6 / Math.max(n - 1, 1));
       model.cards.forEach((c, i) => {
         const v = (i - (n - 1) / 2) * pitch;
@@ -656,7 +644,6 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
           card(`choice:${c.id}:${k}`, "", c.label, kind, v + 0.07 * k, LAY + (extra - k) * 0.016, CENTER_Z - 0.06 * k,
             { yaw: yaw + 0.07 * k, from: reveal });
         }
-        // The judge's pick and the winning cards are lifted and tipped up toward the viewer.
         const picked = Boolean(c.order) || model.result;
         card("choice:" + c.id, c.text, c.label, kind, v, picked ? 1.05 : LAY + extra * 0.016,
           picked ? CENTER_Z + 0.75 : CENTER_Z, {

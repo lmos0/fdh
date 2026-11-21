@@ -48,12 +48,10 @@ describe("reiniciar partida na mesma sala", () => {
     const sound = tracker.observe(snap);
     expect(sound).toBe(snap.room.round!.judgePlayerId === snap.self.playerId ? "judge" : "round");
 
-    // A sala não expira após 15 minutos porque finishedAt foi limpo.
     const afterWait = h.tick(16 * 60_000);
     expect(afterWait.deliveries.some(d => d.event.type === "room.closed")).toBe(false);
     expect(h.view("c0").room.phase).toBe("submitting");
 
-    // A nova partida funciona até um novo vencedor.
     h.submitAll();
     const judge = h.judgeConnection();
     const round = h.view(judge).room.round!;
@@ -69,15 +67,12 @@ describe("reiniciar partida na mesma sala", () => {
     const tracker = createGameSoundTracker();
     tracker.observe(h.view("c0"));
 
-    // Jogador 2 sai após o fim: restam 2 pessoas (< 3).
     h.command("c2", "room.leave", {});
     expect(h.view("c0").room.players.length).toBe(2);
-    // Reinício imediato recusa sem mutar o estado final.
     expect(errorCode(h.command("c0", "game.restart", {}))).toBe("NOT_ENOUGH_PLAYERS");
     expect(h.view("c0").room.phase).toBe("finished");
     expect(h.view("c0").room.winnerPlayerId).not.toBeNull();
 
-    // Voltar à sala de espera funciona mesmo com menos de 3 participantes.
     expect(errorCode(h.command("c0", "game.restart", { toLobby: true }))).toBeUndefined();
     const lobby = h.view("c0");
     expect(lobby.room.code).toBe(originalCode);
@@ -90,7 +85,6 @@ describe("reiniciar partida na mesma sala", () => {
     expect(lobby.self.hand).toEqual([]);
     expect(tracker.observe(lobby)).toBeNull();
 
-    // Anfitrião reconfigura, nova pessoa entra com o mesmo código e a partida recomeça.
     expect(errorCode(h.command("c0", "room.configure", { targetScore: 7 }))).toBeUndefined();
     expect(errorCode(h.command("c3", "room.join", { code: originalCode, nickname: "Pessoa 3" }))).toBeUndefined();
     expect(errorCode(h.command("c0", "game.start", {}))).toBeUndefined();
@@ -117,7 +111,6 @@ describe("reiniciar partida na mesma sala", () => {
     h.command("c0", "game.start", {});
     expect(errorCode(h.command("c0", "game.restart", {}))).toBe("INVALID_PHASE");
 
-    // Termina a partida.
     for (let round = 0; round < 15 && h.view().room.phase !== "finished"; round++) {
       h.submitAll();
       const judge = h.judgeConnection();
@@ -126,18 +119,15 @@ describe("reiniciar partida na mesma sala", () => {
       if (h.view().room.phase === "round_result") h.tick(15_000);
     }
 
-    // Não anfitrião não pode reiniciar.
     expect(errorCode(h.command("c1", "game.restart", {}))).toBe("NOT_HOST");
     expect(errorCode(h.command("c1", "game.restart", { toLobby: true }))).toBe("NOT_HOST");
 
-    // Desconexão bloqueia reinício imediato sem corromper placar, mas permite voltar ao lobby.
     const scoresBefore = h.view("c0").room.players.map(player => player.score);
     h.disconnect("c1");
     expect(errorCode(h.command("c0", "game.restart", {}))).toBe("PLAYERS_DISCONNECTED");
     expect(h.view("c0").room.phase).toBe("finished");
     expect(h.view("c0").room.players.map(player => player.score)).toEqual(scoresBefore);
 
-    // Payload inválido é rejeitado pelo protocolo.
     expect(() => parseMessage(JSON.stringify({ type: "game.restart", requestId: "r1", payload: { toLobby: "yes" } }))).toThrow();
     expect(() => parseMessage(JSON.stringify({ type: "game.restart", requestId: "r2", payload: { extra: true } }))).toThrow();
   });
@@ -173,7 +163,6 @@ describe("reiniciar partida na mesma sala", () => {
     expect(restarted.room.round!.judgePlayerId).toBe(restarted.self.playerId);
     expect(restarted.room.players.every(player => player.score === 0)).toBe(true);
 
-    // Bots respondem automaticamente na nova partida.
     h.tick(BOT_SUBMIT_DELAY_MS);
     h.tick(BOT_SUBMIT_DELAY_MS);
     expect(h.view("c0").room.phase).toBe("judging");

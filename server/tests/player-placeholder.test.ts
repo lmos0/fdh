@@ -43,12 +43,10 @@ describe("placeholder de nome de jogador nas perguntas", () => {
     expect(resolved).not.toContain("{player}");
     expect(names.some(name => resolved === `Ninguém esperava que ${name} fosse parar no Jornal Nacional por _____.`)).toBe(true);
 
-    // Todos os participantes na sala veem exatamente o mesmo nome sorteado.
     for (const connectionId of h.connections) {
       expect(h.view(connectionId).room.round!.prompt.text).toBe(resolved);
     }
 
-    // Reconexão mantém o texto resolvido da rodada sem sortear outro nome.
     h.disconnect("c1");
     h.command("c1_reconnected", "session.resume", {
       code: h.code,
@@ -56,7 +54,6 @@ describe("placeholder de nome de jogador nas perguntas", () => {
     });
     expect(h.view("c1_reconnected").room.round!.prompt.text).toBe(resolved);
 
-    // Histórico preserva o nome sorteado daquela rodada.
     const judge = h.judgeConnection();
     const connections = h.connections.map(id => id === "c1" ? "c1_reconnected" : id);
     for (const connectionId of connections) {

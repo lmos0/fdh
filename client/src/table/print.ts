@@ -21,7 +21,6 @@ function paperGrain(g: CanvasRenderingContext2D, seed: number, light: boolean) {
       : `rgba(255,255,255,${rand() * 0.028})`;
     g.fillRect(rand() * W, rand() * H, 1.5 + rand() * 3, 1);
   }
-  // Subtle cross-woven cardstock sheen lines
   g.fillStyle = light ? "rgba(95,70,45,0.015)" : "rgba(255,255,255,0.014)";
   for (let y = 0; y < H; y += 6) g.fillRect(0, y, W, 1);
 }
@@ -48,7 +47,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
   const ink = kind === "black" ? "#ffffff" : kind === "gold" ? "#1e1002" : "#0b0714";
   const spot = kind === "gold" ? "#6e4000" : kind === "black" ? "#ff72ba" : "#a80d56";
 
-  // --- Cardstock Base & Realistic Tonal Depth ---
   if (kind === "gold") {
     const foil = g.createLinearGradient(0, 0, W, H);
     foil.addColorStop(0, "#f5d376");
@@ -58,7 +56,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     foil.addColorStop(1, "#cc8f1d");
     g.fillStyle = foil;
     g.fillRect(0, 0, W, H);
-    // Fine brushed metallic gold micro-streaks
     g.save();
     g.strokeStyle = "rgba(255,250,225,0.16)";
     g.lineWidth = 1.5;
@@ -94,7 +91,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
 
   paperGrain(g, hash(text + kind), !dark);
 
-  // Subtle edge vignette so cards read cleanly as tactile heavy paper stock
   const edgeShade = g.createRadialGradient(W / 2, H / 2, W * 0.36, W / 2, H / 2, H * 0.72);
   edgeShade.addColorStop(0, "rgba(0,0,0,0)");
   edgeShade.addColorStop(1, kind === "white" ? "rgba(60,38,18,0.08)" : "rgba(0,0,0,0.2)");
@@ -102,7 +98,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
   g.fillRect(0, 0, W, H);
 
   if (kind === "back") {
-    // Ornate bespoke playing-card trellis pattern
     g.save();
     rounded(g, 42, 42, W - 84, H - 84, 30);
     g.clip();
@@ -113,7 +108,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
       g.beginPath(); g.moveTo(x, 0); g.lineTo(x + H, H); g.stroke();
       g.beginPath(); g.moveTo(x + H, 0); g.lineTo(x, H); g.stroke();
     }
-    // Delicate diamond dots at intersections
     g.fillStyle = "rgba(255,222,175,0.22)";
     for (let x = 66; x < W - 50; x += step) {
       for (let y = 66; y < H - 50; y += step) {
@@ -124,7 +118,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     }
     g.restore();
 
-    // Crisp cream & champagne-gold double filigree frame
     g.strokeStyle = "#fff1dc";
     g.lineWidth = 7;
     rounded(g, 36, 36, W - 72, H - 72, 32);
@@ -135,7 +128,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     rounded(g, 54, 54, W - 108, H - 108, 22);
     g.stroke();
 
-    // Corner diamonds
     g.fillStyle = "#ffe3b0";
     for (const [cx, cy] of [[82, 82], [W - 82, 82], [82, H - 82], [W - 82, H - 82]]) {
       g.save();
@@ -145,7 +137,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
       g.restore();
     }
 
-    // Embossed central brand stamp medallion
     g.save();
     g.translate(W / 2, H / 2);
     g.rotate(-0.07);
@@ -180,7 +171,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     g.fillText("COM  AMIGOS", 0, 96);
     g.restore();
   } else {
-    // --- Front Printed Card ---
     const borderColor = order
       ? "#f0532c"
       : kind === "black"
@@ -194,7 +184,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     rounded(g, inset, inset, W - inset * 2, H - inset * 2, order ? 36 : 30);
     g.stroke();
 
-    // Inner filigree line for gold winning card
     if (kind === "gold") {
       g.strokeStyle = "rgba(139,90,6,0.45)";
       g.lineWidth = 2;
@@ -208,7 +197,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
       }
     }
 
-    // Header label + crisp editorial divider rule
     g.fillStyle = spot;
     g.font = `900 34px ${MONO}`;
     g.fillText(label, PAD, 102, W - PAD * 2);
@@ -218,7 +206,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     g.fillRect(PAD, 124, W - PAD * 2, 3.5);
     g.globalAlpha = 1;
 
-    // Main card text — crisp high-contrast heavy letterpress typography
     const max = W - PAD * 2;
     const maxHeight = 680;
     let size = kind === "black" ? 86 : 102;
@@ -242,7 +229,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
       g.fillText(line, PAD, startY + i * lineStep, max);
     });
 
-    // Footer deck emblem (crisp stacked mini-cards + FDH mark)
     g.save();
     g.translate(PAD, H - 94);
     g.fillStyle = kind === "black" ? "#ffffff" : "#180f2c";
@@ -271,7 +257,6 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
       g.restore();
     }
 
-    // Selection order badge
     if (order) {
       g.save();
       g.shadowColor = "rgba(0,0,0,0.35)";

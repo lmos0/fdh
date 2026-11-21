@@ -46,7 +46,6 @@ export function TableStage({ model, pick, title = "Mesa da rodada", preview = fa
           onZoom: value => {
             if (!active) return;
             setZoom(value);
-            // The first time the view is zoomed in, say how to look around.
             if (value > 1.001 && !taught.current) showHint("Arraste para mover a vista");
             taught.current ||= value > 1.001;
           },

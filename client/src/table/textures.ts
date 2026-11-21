@@ -43,7 +43,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     return t;
   }
 
-  // --- 1. Artisan Honey-Oak Tabletop Planks (Albedo + Bump + Roughness)
   const boardColors = ["#b87f4e", "#c28a58", "#b17748", "#be8655", "#c8915f", "#b67d4d"];
   const woodMeta = boardColors.map((color, i) => {
     const rand = seeded(41 + i * 19);
@@ -72,7 +71,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       g.fillStyle = grad;
       g.fillRect(0, y, 1024, bh);
 
-      // Subtle warm plank lighting gradient across width
       const plankShade = g.createLinearGradient(0, y, 0, y + bh);
       plankShade.addColorStop(0, "rgba(255,235,205,0.09)");
       plankShade.addColorStop(0.18, "rgba(255,255,255,0)");
@@ -81,7 +79,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       g.fillStyle = plankShade;
       g.fillRect(0, y, 1024, bh);
 
-      // Multi-frequency wood grain fibers with deflection around knots
       for (const f of b.fibers) {
         const base = y + f.v * bh;
         g.strokeStyle = f.dark
@@ -107,14 +104,12 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.stroke();
       }
 
-      // Fine wood pores
       const poreRand = seeded(300 + i * 37);
       for (let p = 0; p < 340; p++) {
         g.fillStyle = `rgba(74,38,16,${0.06 + poreRand() * 0.09})`;
         g.fillRect(poreRand() * 1024, y + poreRand() * bh, 4 + poreRand() * 14, 0.8);
       }
 
-      // Natural wood knot
       if (b.knot) {
         const kx = b.knot.x, ky = y + b.knot.y * bh;
         for (let r = 5; r >= 1; r--) {
@@ -133,7 +128,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fill();
       }
 
-      // Chamfered plank seams & end-joint
       g.fillStyle = "rgba(58,32,16,0.68)";
       g.fillRect(b.joint, y, 2, bh);
       g.fillStyle = "rgba(255,232,200,0.16)";
@@ -169,7 +163,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.fillStyle = `rgba(40,40,40,${0.18 + poreRand() * 0.2})`;
         g.fillRect(poreRand() * 1024, y + poreRand() * bh, 4 + poreRand() * 14, 1);
       }
-      // Deep plank seams
       g.fillStyle = "#181818";
       g.fillRect(0, y, 1024, 2.6);
       g.fillRect(b.joint, y, 2.2, bh);
@@ -183,7 +176,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     g.fillRect(0, 0, 1024, 512);
     woodMeta.forEach((b, i) => {
       const y = i * bh;
-      // Subtle board-to-board sheen variance
       const shade = 92 + (i % 3) * 10;
       g.fillStyle = `rgb(${shade},${shade},${shade})`;
       g.fillRect(0, y, 1024, bh);
@@ -199,14 +191,12 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         }
         g.stroke();
       }
-      // Matte grooves
       g.fillStyle = "rgb(230,230,230)";
       g.fillRect(0, y, 1024, 3);
       g.fillRect(b.joint, y, 2.5, bh);
     });
   }, false);
 
-  // --- 2. Rich Mahogany / Walnut Wood (Chairs, Apron, Gavel)
   const mahoganyMap = make(512, 256, g => {
     const rand = seeded(91);
     const grad = g.createLinearGradient(0, 0, 512, 256);
@@ -247,7 +237,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false, [1, 1]);
 
-  // --- 3. Glazed Ceramic Kitchen Floor Tiles (Albedo + Bump + Roughness)
   const tilesMap = make(512, 512, g => {
     const rand = seeded(11);
     g.fillStyle = "#8f7b6d";
@@ -262,7 +251,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.roundRect(x, y, s, s, 4);
         g.fill();
 
-        // Subtle handmade ceramic glaze variation per tile
         const tg = g.createLinearGradient(x, y, x + s, y + s);
         tg.addColorStop(0, `rgba(255,248,236,${0.04 + rand() * 0.08})`);
         tg.addColorStop(1, `rgba(70,38,24,${0.03 + rand() * 0.08})`);
@@ -271,7 +259,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
         g.roundRect(x, y, s, s, 4);
         g.fill();
 
-        // Fine ceramic mineral speckles
         for (let m = 0; m < 28; m++) {
           g.fillStyle = rand() > 0.5 ? "rgba(90,55,40,0.06)" : "rgba(255,250,242,0.08)";
           g.fillRect(x + rand() * s, y + rand() * s, 1.5 + rand() * 2, 1.5 + rand() * 2);
@@ -315,12 +302,10 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false, [14, 14]);
 
-  // --- 4. Woven Kilim Rug (Albedo + Bump)
   const rugMap = make(512, 320, g => {
     g.fillStyle = "#214b4f";
     g.fillRect(0, 0, 512, 320);
 
-    // Subtle tonal depth gradient across the wool field
     const rg = g.createRadialGradient(256, 160, 40, 256, 160, 290);
     rg.addColorStop(0, "rgba(255,240,210,0.06)");
     rg.addColorStop(1, "rgba(10,20,24,0.22)");
@@ -340,7 +325,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       g.strokeRect(inset, inset, 512 - inset * 2, 320 - inset * 2);
     }
 
-    // Woven kilim diamond medallions
     for (let x = 92; x < 428; x += 42) {
       for (let y = 94; y < 236; y += 44) {
         g.save();
@@ -354,7 +338,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       }
     }
 
-    // Woven yarn horizontal ribs & slub noise
     for (let y = 0; y < 320; y += 3) {
       g.fillStyle = y % 6 === 0 ? "rgba(255,250,235,0.06)" : "rgba(0,0,0,0.08)";
       g.fillRect(0, y, 512, 1.4);
@@ -379,7 +362,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false);
 
-  // --- 5. Woven Linen Gingham Kitchen Towel (Albedo + Bump)
   const towelMap = make(256, 256, g => {
     g.fillStyle = "#faf0dc";
     g.fillRect(0, 0, 256, 256);
@@ -388,7 +370,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     g.fillRect(0, 0, 256, 128);
     g.fillStyle = "rgba(168,38,44,0.34)";
     g.fillRect(0, 0, 128, 128);
-    // Fine woven linen threads
     for (let i = 0; i < 256; i += 4) {
       g.fillStyle = i % 8 === 0 ? "rgba(255,250,240,0.22)" : "rgba(90,30,30,0.08)";
       g.fillRect(0, i, 256, 1.2);
@@ -410,7 +391,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false, [4, 3]);
 
-  // --- 6. Playing-Card Air-Cushion Linen Micro-Texture (Bump + Roughness)
   const linenBump = make(256, 256, g => {
     g.fillStyle = "#808080";
     g.fillRect(0, 0, 256, 256);
@@ -437,7 +417,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false, [5, 7]);
 
-  // --- 7. Striated Card Deck Side Texture (shows crisp stacked ivory cardstock sheets)
   const deckEdge = make(64, 256, g => {
     const rand = seeded(77);
     g.fillStyle = "#f4ece0";
@@ -451,11 +430,10 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, true);
 
-  // --- 8. Artisan Speckled Ceramic Glazes (Mug & Plate)
   const ceramicBlue = make(256, 256, g => {
     const rand = seeded(31);
     const grad = g.createLinearGradient(0, 0, 0, 256);
-    grad.addColorStop(0, "#7b5e47"); // warm toasted stoneware rim
+    grad.addColorStop(0, "#7b5e47");
     grad.addColorStop(0.06, "#468298");
     grad.addColorStop(0.55, "#3b758c");
     grad.addColorStop(1, "#2f5f73");
@@ -482,7 +460,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, true);
 
-  // --- 9. Espresso Coffee with Golden Crema Ring
   const coffee = make(256, 256, g => {
     const rand = seeded(53);
     const rad = g.createRadialGradient(128, 128, 14, 128, 128, 128);
@@ -493,7 +470,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     rad.addColorStop(1, "#cfa068");
     g.fillStyle = rad;
     g.fillRect(0, 0, 256, 256);
-    // Tiny crema micro-bubbles near rim
     for (let i = 0; i < 180; i++) {
       const a = rand() * Math.PI * 2;
       const d = 82 + rand() * 42;
@@ -504,13 +480,10 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, true);
 
-  // --- 10. Artisan Wood-Fired Pizza Cheese & Crust
   const pizzaMap = make(512, 512, g => {
     const rand = seeded(61);
-    // Rich tomato sauce base along borders
     g.fillStyle = "#b53322";
     g.fillRect(0, 0, 512, 512);
-    // Melted golden mozzarella blanket
     const cg = g.createRadialGradient(256, 256, 30, 256, 256, 310);
     cg.addColorStop(0, "#ffd778");
     cg.addColorStop(0.7, "#f4b94c");
@@ -518,7 +491,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     g.fillStyle = cg;
     g.fillRect(14, 14, 484, 484);
 
-    // Melted cheese pools & golden toasted blister spots
     for (let i = 0; i < 240; i++) {
       const x = rand() * 512, y = rand() * 512, r = 6 + rand() * 24;
       const pick = rand();
@@ -531,7 +503,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       g.ellipse(x, y, r, r * (0.6 + rand() * 0.5), rand() * Math.PI, 0, Math.PI * 2);
       g.fill();
     }
-    // Red tomato sauce peeks
     for (let i = 0; i < 18; i++) {
       const x = 40 + rand() * 432, y = 40 + rand() * 432, r = 8 + rand() * 14;
       g.fillStyle = "rgba(182,42,24,0.45)";
@@ -539,7 +510,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
       g.ellipse(x, y, r, r * 0.7, rand() * Math.PI, 0, Math.PI * 2);
       g.fill();
     }
-    // Fine oregano flecks
     for (let i = 0; i < 160; i++) {
       g.fillStyle = "rgba(48,74,30,0.55)";
       g.fillRect(rand() * 512, rand() * 512, 2 + rand() * 2.5, 1.5);
@@ -567,7 +537,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     grad.addColorStop(1, "#9a5926");
     g.fillStyle = grad;
     g.fillRect(0, 0, 256, 256);
-    // Leopard-spotted wood-fired char blisters & flour dusting
     for (let i = 0; i < 180; i++) {
       const pick = rand();
       g.fillStyle = pick < 0.25
@@ -593,7 +562,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false);
 
-  // --- 11. Pressed Cork Coaster
   const corkMap = make(256, 256, g => {
     const rand = seeded(83);
     g.fillStyle = "#b58657";
@@ -614,7 +582,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false);
 
-  // --- 12. Chair Cushion Linen Weave Bump
   const fabricBump = make(128, 128, g => {
     const rand = seeded(101);
     g.fillStyle = "#808080";
@@ -633,7 +600,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false, [3, 3]);
 
-  // --- 13. Beer / Soda Creamy Foam
   const foamMap = make(256, 256, g => {
     const rand = seeded(109);
     const rad = g.createRadialGradient(128, 128, 10, 128, 128, 128);
@@ -662,7 +628,6 @@ export function createTextureBundle(anisotropy: number, track: (t: T.Texture) =>
     }
   }, false);
 
-  // --- 14. Soft Radial Contact Shadow Blob
   const shadowBlob = make(128, 128, g => {
     const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
     grad.addColorStop(0, "rgba(18,10,6,0.72)");

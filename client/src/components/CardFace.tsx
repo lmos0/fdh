@@ -1,4 +1,3 @@
-/** Pequena assinatura visual, decorativa e sem imagens externas. */
 export function CardFace({ className = "", mischievous = false, expression }: {
   className?: string; mischievous?: boolean;
   expression?: "curious" | "thinking" | "suspicious" | "mischievous" | "sleepy";

@@ -9,7 +9,6 @@ export function fillsInline(text: string, count: number) {
   return count > 0 && text.replace(MARKER, "").split(BLANK).length - 1 === count;
 }
 
-/** Pergunta com as lacunas preenchidas, em ordem, pelas cartas escolhidas. */
 export function FilledPrompt({ text, answers = [] }: { text: string; answers?: (string | null)[] }) {
   const parts = text.replace(MARKER, "").split(BLANK);
   const inline = fillsInline(text, answers.length);

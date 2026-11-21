@@ -10,7 +10,7 @@ interface CardFinish {
   clearcoat: number; clearcoatRoughness: number; envMapIntensity: number; emissiveIntensity: number;
 }
 const PAPER_FINISH = { bumpScale: 0.35, linenRoughness: true, metalness: 0, clearcoatRoughness: 0.5 } as const;
-const BACK_FINISH: CardFinish = { ...PAPER_FINISH, roughness: 0.66, clearcoat: 0.12, envMapIntensity: 0.5, emissiveIntensity: 0.03 };
+const BACK_FINISH: CardFinish = { ...PAPER_FINISH, roughness: 0.84, clearcoat: 0.03, envMapIntensity: 0.24, emissiveIntensity: 0.04 };
 const CARD_FINISHES: Record<PrintKind, CardFinish> = {
   white: { ...PAPER_FINISH, roughness: 0.86, clearcoat: 0, envMapIntensity: 0.25, emissiveIntensity: 0.04 },
   black: { ...PAPER_FINISH, roughness: 0.9, clearcoat: 0, envMapIntensity: 0.2, emissiveIntensity: 0.08 },

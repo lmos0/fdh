@@ -42,6 +42,221 @@ const PRINT_INKS: Record<PrintKind, { ink: string; spot: string }> = {
   gold: { ink: "#1e1002", spot: "#6e4000" },
 };
 
+function fillSpacedText(g: CanvasRenderingContext2D, text: string, cx: number, y: number, spacing: number) {
+  const chars = [...text];
+  const widths = chars.map(ch => g.measureText(ch).width);
+  const total = widths.reduce((sum, width) => sum + width, 0) + spacing * Math.max(0, chars.length - 1);
+  let x = cx - total / 2;
+  g.textAlign = "left";
+  for (let i = 0; i < chars.length; i++) {
+    g.fillText(chars[i]!, x, y);
+    x += widths[i]! + spacing;
+  }
+}
+
+/** Desenha o rosto travesso (mesmas proporções do favicon.svg / CardFace "mischievous"). */
+function drawMischievousFace(
+  g: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  options: { stroke: string; badge?: string; blushAlpha?: number; hornFill?: string; strokeWidth?: number },
+) {
+  const scale = size / 32;
+  g.save();
+  g.translate(cx - size / 2, cy - size / 2);
+  g.scale(scale, scale);
+  g.lineCap = "round";
+  g.lineJoin = "round";
+
+  if (options.badge) {
+    g.fillStyle = options.badge;
+    rounded(g, 3.2, 6.2, 25.6, 23.6, 8);
+    g.fill();
+  }
+
+  g.strokeStyle = options.stroke;
+  g.lineWidth = options.strokeWidth ?? 2.6;
+
+  for (const horn of [
+    [[7.4, 9.2], [5.4, 3.2], [12.8, 7.2]],
+    [[24.6, 9.2], [26.6, 3.2], [19.2, 7.2]],
+  ] as const) {
+    g.beginPath();
+    g.moveTo(horn[0][0], horn[0][1]);
+    g.lineTo(horn[1][0], horn[1][1]);
+    g.lineTo(horn[2][0], horn[2][1]);
+    if (options.hornFill) {
+      g.closePath();
+      g.fillStyle = options.hornFill;
+      g.fill();
+    }
+    g.stroke();
+  }
+
+  g.beginPath();
+  g.moveTo(9.4, 14.2);
+  g.lineTo(13.4, 15.5);
+  g.moveTo(22.6, 14.2);
+  g.lineTo(18.6, 15.5);
+  g.stroke();
+
+  g.beginPath();
+  g.moveTo(9.8, 21.2);
+  g.quadraticCurveTo(16, 26.2, 22.4, 19.8);
+  g.stroke();
+
+  if (options.blushAlpha && options.blushAlpha > 0) {
+    g.globalAlpha = options.blushAlpha;
+    g.lineWidth = 2.1;
+    g.beginPath();
+    g.moveTo(7.4, 19.2);
+    g.lineTo(9.6, 19.2);
+    g.moveTo(22.4, 19.2);
+    g.lineTo(24.6, 19.2);
+    g.stroke();
+  }
+
+  g.restore();
+}
+
+function drawBackWordmark(g: CanvasRenderingContext2D, subtitleColor: string) {
+  g.save();
+  g.fillStyle = "#ffffff";
+  g.font = `900 224px ${SANS}`;
+  fillSpacedText(g, "FDH", W / 2, 534, 10);
+
+  g.fillStyle = subtitleColor;
+  g.font = `800 50px ${SANS}`;
+  fillSpacedText(g, "COM AMIGOS", W / 2, 606, 3.5);
+  g.restore();
+}
+
+function drawResponseBack(g: CanvasRenderingContext2D) {
+  const frameInset = 36;
+  g.save();
+  rounded(g, frameInset, frameInset, W - frameInset * 2, H - frameInset * 2, 24);
+  g.clip();
+
+  const watermarkStyle = {
+    badge: "rgba(88, 2, 40, 0.42)",
+    stroke: "rgba(170, 12, 82, 0.56)",
+    hornFill: "rgba(88, 2, 40, 0.42)",
+    strokeWidth: 2.3,
+  };
+  for (const [cx, cy, size] of [
+    [164, 112, 184],
+    [W - 164, 112, 184],
+    [152, 828, 192],
+    [W / 2, 828, 192],
+    [W - 152, 828, 192],
+  ] as const) {
+    drawMischievousFace(g, cx, cy, size, watermarkStyle);
+  }
+  g.restore();
+
+  g.strokeStyle = "rgba(255, 198, 224, 0.78)";
+  g.lineWidth = 6;
+  rounded(g, frameInset, frameInset, W - frameInset * 2, H - frameInset * 2, 24);
+  g.stroke();
+
+  drawMischievousFace(g, W / 2, 224, 152, {
+    badge: "#5e042d",
+    stroke: "#ff98cc",
+    blushAlpha: 0.45,
+    strokeWidth: 2.7,
+  });
+
+  drawBackWordmark(g, "#ff99cb");
+}
+
+function drawPromptBack(g: CanvasRenderingContext2D) {
+  const inset = 40;
+  const hw = W / 2 - inset;
+  const hh = H / 2 - inset;
+  const notch = 50;
+  const lineStroke = "rgba(176, 170, 188, 0.44)";
+  const mutedDot = "rgba(176, 170, 188, 0.48)";
+  const pinkAccent = "#f584bc";
+
+  g.save();
+  g.translate(W / 2, H / 2);
+
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    g.save();
+    g.scale(sx, sy);
+
+    // Detalhe triangular arredondado rosa encaixado no canto côncavo.
+    g.fillStyle = pinkAccent;
+    g.beginPath();
+    g.moveTo(-hw + 8, -hh + 2);
+    g.lineTo(-hw + 33, -hh + 2);
+    g.quadraticCurveTo(-hw + 37, -hh + 2, -hw + 33, -hh + 9);
+    g.quadraticCurveTo(-hw + 22, -hh + 22, -hw + 9, -hh + 33);
+    g.quadraticCurveTo(-hw + 2, -hh + 37, -hw + 2, -hh + 33);
+    g.lineTo(-hw + 2, -hh + 8);
+    g.quadraticCurveTo(-hw + 2, -hh + 2, -hw + 8, -hh + 2);
+    g.closePath();
+    g.fill();
+
+    g.strokeStyle = lineStroke;
+    g.lineWidth = 5;
+    g.lineCap = "round";
+    g.beginPath();
+    g.arc(-hw, -hh, notch, 0, Math.PI / 2);
+    g.stroke();
+
+    for (let i = 0; i < 4; i++) {
+      const offset = notch + 18 + i * 17;
+      const isPink = i === 3;
+      g.fillStyle = isPink ? pinkAccent : mutedDot;
+      const radius = isPink ? 4.6 : 3.4;
+
+      g.beginPath();
+      g.arc(-hw + offset, -hh, radius, 0, Math.PI * 2);
+      g.fill();
+
+      g.beginPath();
+      g.arc(-hw, -hh + offset, radius, 0, Math.PI * 2);
+      g.fill();
+    }
+
+    const segmentStart = notch + 92;
+    g.strokeStyle = lineStroke;
+    g.lineWidth = 5;
+    g.beginPath();
+    g.moveTo(-hw + segmentStart, -hh);
+    g.lineTo(-38, -hh);
+    g.moveTo(-hw, -hh + segmentStart);
+    g.lineTo(-hw, -50);
+    g.stroke();
+
+    g.restore();
+  }
+
+  g.fillStyle = pinkAccent;
+  for (const [dx, dy, radius] of [
+    [0, -hh, 6],
+    [0, hh, 6],
+    [-hw, 0, 6.8],
+    [hw, 0, 6.8],
+  ] as const) {
+    g.beginPath();
+    g.arc(dx, dy, radius, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  g.restore();
+
+  drawMischievousFace(g, W / 2, 224, 146, {
+    stroke: "#ff8ac3",
+    blushAlpha: 0.42,
+    strokeWidth: 2.8,
+  });
+
+  drawBackWordmark(g, "#f584bc");
+}
+
 /** High-resolution letterpress-style card art. Corners outside the die-cut stay transparent (alphaTest). */
 export function cardPrint(text: string, label: string, kind: PrintKind, order = 0) {
   const canvas = document.createElement("canvas");
@@ -82,10 +297,10 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
     g.fillStyle = bg;
     g.fillRect(0, 0, W, H);
   } else if (kind === "back") {
-    const bg = g.createRadialGradient(W * 0.5, H * 0.44, 60, W * 0.5, H * 0.5, H * 0.76);
-    bg.addColorStop(0, promptBack ? "#2a2236" : "#c81967");
-    bg.addColorStop(0.68, promptBack ? "#1a1524" : "#a61053");
-    bg.addColorStop(1, promptBack ? "#100c17" : "#7b093c");
+    const bg = g.createRadialGradient(W * 0.5, H * 0.44, 60, W * 0.5, H * 0.5, H * 0.78);
+    bg.addColorStop(0, promptBack ? "#18171c" : "#a3064c");
+    bg.addColorStop(0.68, promptBack ? "#121215" : "#8d0441");
+    bg.addColorStop(1, promptBack ? "#0c0c0f" : "#6f0232");
     g.fillStyle = bg;
     g.fillRect(0, 0, W, H);
   } else {
@@ -101,83 +316,13 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
 
   const edgeShade = g.createRadialGradient(W / 2, H / 2, W * 0.36, W / 2, H / 2, H * 0.72);
   edgeShade.addColorStop(0, "rgba(0,0,0,0)");
-  edgeShade.addColorStop(1, kind === "white" ? "rgba(60,38,18,0.08)" : "rgba(0,0,0,0.2)");
+  edgeShade.addColorStop(1, kind === "white" ? "rgba(60,38,18,0.08)" : "rgba(0,0,0,0.18)");
   g.fillStyle = edgeShade;
   g.fillRect(0, 0, W, H);
 
   if (kind === "back") {
-    g.save();
-    rounded(g, 42, 42, W - 84, H - 84, 30);
-    g.clip();
-    g.strokeStyle = "rgba(255,232,242,0.13)";
-    g.lineWidth = 3;
-    const step = 44;
-    for (let x = -H; x < W + H; x += step) {
-      g.beginPath(); g.moveTo(x, 0); g.lineTo(x + H, H); g.stroke();
-      g.beginPath(); g.moveTo(x + H, 0); g.lineTo(x, H); g.stroke();
-    }
-    g.fillStyle = "rgba(255,222,175,0.22)";
-    for (let x = 66; x < W - 50; x += step) {
-      for (let y = 66; y < H - 50; y += step) {
-        g.beginPath();
-        g.arc(x, y, 2.5, 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-    g.restore();
-
-    g.strokeStyle = "#fff1dc";
-    g.lineWidth = 7;
-    rounded(g, 36, 36, W - 72, H - 72, 32);
-    g.stroke();
-
-    g.strokeStyle = "rgba(255,214,142,0.85)";
-    g.lineWidth = 2.5;
-    rounded(g, 54, 54, W - 108, H - 108, 22);
-    g.stroke();
-
-    g.fillStyle = "#ffe3b0";
-    for (const [cx, cy] of [[82, 82], [W - 82, 82], [82, H - 82], [W - 82, H - 82]]) {
-      g.save();
-      g.translate(cx, cy);
-      g.rotate(Math.PI / 4);
-      g.fillRect(-7, -7, 14, 14);
-      g.restore();
-    }
-
-    g.save();
-    g.translate(W / 2, H / 2);
-    g.rotate(-0.07);
-    g.shadowColor = "rgba(42,3,20,0.65)";
-    g.shadowOffsetY = 14;
-    g.shadowBlur = 24;
-    const stampGrad = g.createLinearGradient(-250, -145, 250, 145);
-    stampGrad.addColorStop(0, "#fffbf2");
-    stampGrad.addColorStop(1, "#f4e5cd");
-    g.fillStyle = stampGrad;
-    rounded(g, -248, -144, 496, 288, 36);
-    g.fill();
-    g.shadowColor = "transparent";
-
-    g.strokeStyle = "#1a102f";
-    g.lineWidth = 6;
-    rounded(g, -230, -126, 460, 252, 24);
-    g.stroke();
-
-    g.strokeStyle = "rgba(200,20,106,0.35)";
-    g.lineWidth = 2;
-    rounded(g, -218, -114, 436, 228, 18);
-    g.stroke();
-
-    g.textAlign = "center";
-    g.fillStyle = "#180f2c";
-    g.font = `900 162px ${SANS}`;
-    g.fillText("FDH", 0, 32);
-
-    g.fillStyle = "#b81160";
-    g.font = `800 32px ${MONO}`;
-    g.fillText("COM  AMIGOS", 0, 96);
-    g.restore();
+    if (promptBack) drawPromptBack(g);
+    else drawResponseBack(g);
   } else {
     const borderColor = order
       ? "#f0532c"

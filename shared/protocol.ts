@@ -3,6 +3,21 @@ export type RoomMode = "private" | "test";
 export interface FeatureFlags { botTestMode: boolean }
 export const PHASE_TIME_LIMITS = [30, 60, 90, 120, 180] as const;
 export const RESULT_INTERVALS = [5, 10, 15, 20, 30] as const;
+
+export const MIN_PLAYERS = 3;
+export const MAX_PLAYERS = 8;
+export const HAND_SIZE = 7;
+export const HISTORY_LIMIT = 30;
+export const RECONNECT_GRACE_SECONDS = 60;
+export const DEFAULT_TARGET_SCORE = 5;
+export const TARGET_SCORE_RANGE = { min: 3, max: 20 } as const;
+export const NICKNAME_LENGTH = { min: 2, max: 24 } as const;
+export const PICK_RANGE = { min: 1, max: 3 } as const;
+export const DRAW_RANGE = { min: 0, max: 2 } as const;
+
+export function isGameInProgress(phase: GamePhase): boolean {
+  return phase !== "lobby" && phase !== "finished";
+}
 export interface Settings { targetScore: number; phaseTimeLimitSeconds: number | null; resultIntervalSeconds: number | null }
 export interface CardView { id: string; text: string }
 export interface PromptView extends CardView { pick: number; draw: number }

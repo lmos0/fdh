@@ -20,3 +20,8 @@ export function moveCard(selection: Selection, index: number, direction: -1 | 1)
   [slots[index], slots[target]] = [slots[target]!, slots[index]!];
   return { slots, activeIndex: target };
 }
+export function dropCard(selection: Selection, cardId: string): Selection {
+  const index = selection.slots.indexOf(cardId);
+  if (index === -1) return selection;
+  return { slots: selection.slots.map(id => id === cardId ? null : id), activeIndex: index };
+}

@@ -20,7 +20,7 @@ export function addTestBots(room: GameRoom, now: number): void {
     while (isNicknameTaken(room, nickname)) nickname += "!";
     const id = crypto.randomUUID();
     room.players.set(id, { id, nickname, score: 0, hand: [], joinedAt: now,
-      disconnectedAt: null, sessionToken: null, isBot: true });
+      disconnectedAt: null, sessionToken: null, isBot: true, freeSwapUsed: false });
     room.playerOrder.push(id);
   }
 }

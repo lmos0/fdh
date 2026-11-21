@@ -1,10 +1,10 @@
 import type { CardView } from "../../../shared/protocol";
 import { CardFace } from "./CardFace";
 
-export function Hand({ cards, selectedIds, onSelect, disabled }: {
-  cards: CardView[]; selectedIds: (string | null)[]; onSelect: (id: string) => void; disabled: boolean;
+export function Hand({ cards, selectedIds, onSelect, disabled, swapping = false }: {
+  cards: CardView[]; selectedIds: (string | null)[]; onSelect: (id: string) => void; disabled: boolean; swapping?: boolean;
 }) {
-  return <div className="card-grid hand-grid">
+  return <div className={`card-grid hand-grid ${swapping ? "is-swapping" : ""}`}>
     {cards.map(card => {
       const order = selectedIds.indexOf(card.id);
       return <button key={card.id} className={`answer-card ${order !== -1 ? "selected" : ""}`}

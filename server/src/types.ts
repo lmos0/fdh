@@ -1,4 +1,4 @@
-import type { GamePhase, RoomMode, RoundResult, ServerEvent, Settings, WinningCombination } from "../../shared/protocol";
+import type { CardSwapNotice, GamePhase, RoomMode, RoundResult, ServerEvent, Settings, WinningCombination } from "../../shared/protocol";
 
 export type Card =
   | { id: string; kind: "prompt"; text: string; pick: number; draw: number }
@@ -14,6 +14,7 @@ export interface Player {
   disconnectedAt: number | null;
   sessionToken: string | null;
   isBot: boolean;
+  freeSwapUsed: boolean;
 }
 export interface Submission { playerId: string; cardIds: string[] }
 export interface JudgingOption extends Submission { id: string }
@@ -77,4 +78,5 @@ export interface Delivery { connectionId: string; event: ServerEvent }
 export interface Effects { deliveries: Delivery[]; closeConnections: string[] }
 export type GameNotice =
   | { type: "round.result"; payload: RoundResult }
-  | { type: "round.cancelled"; payload: { roundId: string; reason: string } };
+  | { type: "round.cancelled"; payload: { roundId: string; reason: string } }
+  | { type: "card.swapped"; payload: CardSwapNotice };

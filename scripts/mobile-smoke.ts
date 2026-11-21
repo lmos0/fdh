@@ -79,6 +79,22 @@ async function audit(page: Page, label: string) {
   audits++;
 }
 
+async function swapFreeCard(page: Page, label: string, handSize: number) {
+  const card = page.locator(".answer-card > span").nth(1);
+  const before = await card.textContent();
+  await page.getByRole("button", { name: "Trocar carta", exact: true }).tap();
+  await page.locator(".answer-card").nth(1).tap();
+  const dialog = page.getByRole("dialog", { name: "Trocar esta carta?" });
+  await dialog.getByText(/única troca gratuita da partida/).waitFor();
+  await audit(page, `${label} / confirmação da troca gratuita`);
+  await dialog.getByRole("button", { name: "Usar troca grátis", exact: true }).tap();
+  await dialog.waitFor({ state: "detached" });
+  // Sem pontos na primeira rodada: a legenda só muda depois do snapshot com a troca aplicada.
+  await page.getByText("Sem pontos para trocar", { exact: true }).waitFor();
+  assert(await page.locator(".answer-card").count() === handSize, "Troca alterou a quantidade de cartas");
+  assert((await card.textContent()) !== before, "Troca não substituiu a carta");
+}
+
 async function chooseTheme(page: Page, theme: "light" | "dark") {
   if (await page.locator("html").getAttribute("data-theme") !== theme) {
     if (await page.locator(".game-menu").count()) await page.locator(".game-menu > summary").tap();
@@ -278,6 +294,7 @@ async function gameByTouch(browser: Browser, deviceName: string) {
         assert(await page.locator(".answer-card").count() === 7 + draw, "Mão com quantidade incorreta");
         assert(await page.locator(".slot-button").count() === pick, "Espaços da combinação ausentes na barra de envio");
         assert(await page.getByRole("button", { name: "Enviar resposta", exact: true }).isDisabled(), "Envio liberado sem seleção");
+        if (rounds === 1 && position === 0) await swapFreeCard(page, `${deviceName} / rodada 1`, 7 + draw);
         const indexes = pick === 1 ? [0] : pick === 2 ? [2, 0] : [2, 0, 4];
         for (const cardIndex of indexes) await page.locator(".answer-card").nth(cardIndex).tap();
         if (rounds === 1) {

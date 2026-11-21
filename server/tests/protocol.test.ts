@@ -31,6 +31,25 @@ describe("validação do protocolo", () => {
     expect(command.payload).toEqual({ roundId: "round", cardIds: ["b", "a", "c"] });
   });
 
+  test("aceita troca de carta só com rodada, carta e custo confirmado", () => {
+    for (const cost of ["free", "point"] as const) {
+      const command = parseMessage(JSON.stringify({ type: "round.swap", requestId: "swap", payload: { roundId: "round", cardId: "a", cost } }));
+      expect(command.payload).toEqual({ roundId: "round", cardId: "a", cost });
+    }
+    for (const payload of [
+      { roundId: "round", cardId: "a" },
+      { roundId: "round", cardId: "a", cost: "gratis" },
+      { roundId: "round", cardId: "a", cost: 1 },
+      { roundId: "round", cost: "free" },
+      { roundId: "round", cardId: 7, cost: "free" },
+      { roundId: "round", cardId: "a".repeat(101), cost: "free" },
+      { roundId: "round", cardIds: ["a"], cost: "free" },
+      { roundId: "round", cardId: "a", cost: "free", playerId: "forged" },
+    ]) {
+      expect(() => parseMessage(JSON.stringify({ type: "round.swap", requestId: "invalid_swap", payload }))).toThrow(RuleError);
+    }
+  });
+
   test("rejeita JSON quebrado, mensagens desconhecidas e propriedades extras", () => {
     for (const raw of ["{", "null", "[]", "42", JSON.stringify({ type: "constructor", payload: {}, requestId: "x" }),
       JSON.stringify({ type: "game.start", payload: { playerId: "forged" }, requestId: "x" }),

@@ -8,7 +8,7 @@ import { elapsedMs, logger as defaultLogger } from "./logger";
 import { requireRule, RuleError } from "./errors";
 import {
   advanceRound, expirePhase, handleDepartures, hasConnectedHuman, initialGame, isNicknameTaken, isPaused,
-  judgeRound, MS_PER_SECOND, requireHost, restartGame, RESULT_DURATION_MS, startGame, submitCards, syncClocks,
+  judgeRound, MS_PER_SECOND, requireHost, restartGame, RESULT_DURATION_MS, startGame, submitCards, swapCard, syncClocks,
 } from "./game";
 import { projectSnapshot } from "./projections";
 import { addTestBots, runDueBotAction, syncBotAction } from "./bots";
@@ -124,11 +124,20 @@ export function createRoomService(catalog: Catalog, options: {
 
   function logNotice(room: GameRoom, notice: GameNotice): void {
     const context = { roomCode: room.code, version: room.version, roundId: notice.payload.roundId };
-    if (notice.type === "round.result") {
-      logger.info("round.completed", { ...context, winnerPlayerId: notice.payload.winnerPlayerId });
-      return;
+    switch (notice.type) {
+      case "round.result":
+        logger.info("round.completed", { ...context, winnerPlayerId: notice.payload.winnerPlayerId });
+        return;
+      case "round.cancelled":
+        logger.info("round.cancelled", { ...context, reason: notice.payload.reason });
+        return;
+      case "card.swapped":
+        return; // Já registrado pelo comando, que também cobre as trocas gratuitas.
+      default: {
+        const unreachable: never = notice;
+        throw new Error(`Aviso não tratado: ${(unreachable as GameNotice).type}`);
+      }
     }
-    logger.info("round.cancelled", { ...context, reason: notice.payload.reason });
   }
 
   function queueNotices(room: GameRoom, notices: GameNotice[], output: Effects): void {
@@ -180,7 +189,7 @@ export function createRoomService(catalog: Catalog, options: {
     const token = randomBytes(SESSION_TOKEN_BYTES).toString("hex");
     const player: Player = {
       id: crypto.randomUUID(), nickname, score: 0, hand: [], joinedAt: timestamp,
-      disconnectedAt: null, sessionToken: token, isBot: false,
+      disconnectedAt: null, sessionToken: token, isBot: false, freeSwapUsed: false,
     };
     const session: Session = {
       token, roomCode: room.code, playerId: player.id, connectionId, requests: cacheFor(connectionId),
@@ -410,6 +419,12 @@ export function createRoomService(catalog: Catalog, options: {
     submitCards(room, player, payload.roundId, payload.cardIds, context.timestamp);
   };
 
+  const swapResponseCard: MemberHandler<"round.swap"> = (payload, { room, player }, context) => {
+    const notices = swapCard(room, player, payload.roundId, payload.cardId, payload.cost);
+    logger.info("card.swapped", { ...context.log, roundId: payload.roundId, swapCost: payload.cost });
+    return notices;
+  };
+
   const judgeResponse: MemberHandler<"round.judge"> = (payload, { room, player }, context) =>
     [judgeRound(room, player, payload.roundId, payload.optionId, catalog, context.timestamp)];
 
@@ -425,6 +440,7 @@ export function createRoomService(catalog: Catalog, options: {
     "round.advance": forMember(advanceResult),
     "round.submit": forMember(submitResponse),
     "round.judge": forMember(judgeResponse),
+    "round.swap": forMember(swapResponseCard),
   };
 
   function runHandler<K extends CommandType>(command: { type: K; payload: CommandPayloads[K] }, context: CommandContext): CommandOutcome {

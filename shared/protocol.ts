@@ -14,6 +14,9 @@ export const TARGET_SCORE_RANGE = { min: 3, max: 20 } as const;
 export const NICKNAME_LENGTH = { min: 2, max: 24 } as const;
 export const PICK_RANGE = { min: 1, max: 3 } as const;
 export const DRAW_RANGE = { min: 0, max: 2 } as const;
+export const SWAP_COST_POINTS = 1;
+export const SWAP_COSTS = ["free", "point"] as const;
+export type SwapCost = typeof SWAP_COSTS[number];
 
 export function isGameInProgress(phase: GamePhase): boolean {
   return phase !== "lobby" && phase !== "finished";
@@ -66,6 +69,7 @@ export interface PlayerPrivateState {
   hand: CardView[];
   submitted: boolean;
   submittedResponses: CardView[];
+  freeSwapAvailable: boolean;
 }
 export interface Snapshot { room: RoomPublicState; self: PlayerPrivateState; serverNow: number }
 
@@ -81,6 +85,8 @@ export interface CommandPayloads {
   "round.advance": { roundId: string };
   "round.submit": { roundId: string; cardIds: string[] };
   "round.judge": { roundId: string; optionId: string };
+  /** `cost` é o custo confirmado na tela; o servidor recusa se não for o custo atual. */
+  "round.swap": { roundId: string; cardId: string; cost: SwapCost };
 }
 export type CommandType = keyof CommandPayloads;
 export type ClientCommand = {
@@ -97,8 +103,10 @@ export type ErrorCode =
   | "STALE_ROUND" | "GAME_PAUSED" | "JUDGE_CANNOT_SUBMIT" | "CARD_NOT_IN_HAND"
   | "INVALID_CARD_COUNT" | "DUPLICATE_CARDS"
   | "ALREADY_SUBMITTED" | "NOT_JUDGE" | "OPTION_NOT_FOUND" | "RATE_LIMITED"
-  | "CONNECTION_REPLACED" | "REQUEST_ID_REUSED" | "INTERNAL_ERROR" | "TEST_ROOM_PRIVATE" | "FEATURE_DISABLED";
+  | "CONNECTION_REPLACED" | "REQUEST_ID_REUSED" | "INTERNAL_ERROR" | "TEST_ROOM_PRIVATE" | "FEATURE_DISABLED"
+  | "JUDGE_CANNOT_SWAP" | "NOT_ENOUGH_POINTS" | "SWAP_COST_CHANGED";
 
+export interface CardSwapNotice { roundId: string; playerId: string; nickname: string }
 export interface SessionCredential { roomCode: string; playerId: string; token: string }
 export interface CommandSuccess {
   command: CommandType;
@@ -113,6 +121,7 @@ export type ServerEvent =
   | (StateEnvelope & { type: "state.snapshot"; payload: Snapshot })
   | (StateEnvelope & { type: "round.result"; payload: RoundResult })
   | (StateEnvelope & { type: "round.cancelled"; payload: { roundId: string; reason: string } })
+  | (StateEnvelope & { type: "card.swapped"; payload: CardSwapNotice })
   | { type: "session.replaced"; payload: { reason: string } }
   | { type: "room.closed"; payload: { reason: string } }
   | { type: "server.restarting"; payload: { message: string } }

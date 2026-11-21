@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { MIN_PLAYERS, type Snapshot } from "../../../shared/protocol";
+import { MIN_PLAYERS, type Snapshot, type SwapCost } from "../../../shared/protocol";
 import { Hand } from "../components/Hand";
 import { AnswerOptions, ResponseList } from "../components/AnswerOptions";
 import { PlayerList } from "../components/PlayerList";
@@ -8,7 +8,8 @@ import { playSound } from "../audio/player";
 import { PhaseClock } from "../components/PhaseClock";
 import { SubmissionBar } from "../components/SubmissionBar";
 import { WinningHistory } from "../components/WinningHistory";
-import { chooseCard, emptySelection, moveCard } from "../selection";
+import { chooseCard, dropCard, emptySelection, moveCard } from "../selection";
+import { SwapConfirmDialog, SwapToggle } from "../components/CardSwap";
 import { RoundTable } from "../components/RoundTable";
 import { PlayerAvatar } from "../components/PlayerAvatar";
 import { ResultParticles } from "../components/ResultParticles";
@@ -30,10 +31,11 @@ function handHeading(isJudge: boolean, submitted: boolean): string {
   return submitted ? "Resposta enviada" : "Sua mão";
 }
 
-export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, advance, restart, revealRoundId }: {
+export function GameScreen({ snapshot, disabled, submit, swap, judge, leave, pause, advance, restart, revealRoundId }: {
   snapshot: Snapshot; disabled: boolean;
   revealRoundId: string | null;
   submit: (roundId: string, cardIds: string[]) => void;
+  swap: (roundId: string, cardId: string, cost: SwapCost) => void;
   judge: (roundId: string, optionId: string) => void;
   leave: () => void;
   pause: (roundId: string, paused: boolean) => void;
@@ -45,6 +47,8 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   const [selection, setSelection] = useState(() => emptySelection(round?.prompt.pick ?? 1));
   const selectedCards = selection.slots.filter((id): id is string => id !== null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
+  const [swapMode, setSwapMode] = useState(false);
+  const [swapCandidateId, setSwapCandidateId] = useState<string | null>(null);
   const [dockHeight, setDockHeight] = useState(0);
   const layout = useRef<HTMLDivElement>(null);
   const resultAnchor = useRef<HTMLElement>(null);
@@ -61,6 +65,8 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   useEffect(() => {
     setSelection(emptySelection(round?.prompt.pick ?? 1));
     setSelectedOption(null);
+    setSwapMode(false);
+    setSwapCandidateId(null);
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [round?.id, round?.prompt.pick]);
   function toggleCard(id: string) {
@@ -86,6 +92,23 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   const canRestartNow = hasEnoughPlayers && connectedCount === room.players.length;
   const judgeName = room.players.find(player => player.id === round?.judgePlayerId)?.nickname ?? "O juiz";
   const locked = disabled || room.paused;
+  const canSwap = room.phase === "submitting" && !isJudge && !self.submitted;
+  const swapping = swapMode && canSwap && !locked;
+  const swapCost: SwapCost = self.freeSwapAvailable ? "free" : "point";
+  const selfScore = room.players.find(player => player.id === self.playerId)?.score ?? 0;
+  const swapCandidate = canSwap && !room.paused ? self.hand.find(card => card.id === swapCandidateId) : undefined;
+  function pickCard(id: string) {
+    if (!swapping) return toggleCard(id);
+    playSound("select");
+    setSwapCandidateId(id);
+  }
+  function confirmSwap() {
+    if (!round || !swapCandidate) return;
+    setSelection(previous => dropCard(previous, swapCandidate.id));
+    swap(round.id, swapCandidate.id, swapCost);
+    setSwapCandidateId(null);
+    setSwapMode(false);
+  }
   const result = round?.result;
   const ranking = [...room.players].sort((a, b) => b.score - a.score);
   const revealing = result !== null && result !== undefined && result.roundId === revealRoundId;
@@ -106,7 +129,7 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   }
   return <div ref={layout} className={`room-layout game-layout phase-${room.phase}`} style={{ "--submission-dock-height": `${dockHeight}px` } as CSSProperties}>
     <TableStage model={tableModel(snapshot, selection.slots, selectedOption, disabled, promptAnswers)}
-      title={`Mesa ${room.code}`} pick={room.phase === "judging" ? inspectOption : toggleCard} />
+      title={`Mesa ${room.code}`} pick={room.phase === "judging" ? inspectOption : pickCard} />
     <div className="table-side">
       <RoundTable snapshot={snapshot} disabled={disabled} pause={pause} answers={promptAnswers} />
       <aside className="panel roster-panel"><div className="section-heading"><h2>Placar</h2><span className="count-pill">Meta: {room.settings.targetScore} pts</span></div>
@@ -156,7 +179,10 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
                 <p>Aguardando as outras respostas. Depois, {judgeName} escolhe a vencedora.</p></div>
             </> : <>
               {round.prompt.pick > 1 && <p className="muted hand-hint">Toque nas cartas na ordem da resposta. <span>Para trocar uma, toque no espaço dela na barra de envio.</span></p>}
-              <Hand cards={self.hand} selectedIds={selection.slots} onSelect={toggleCard} disabled={locked} />
+              <SwapToggle active={swapping} cost={swapCost} score={selfScore} disabled={locked} onToggle={() => setSwapMode(value => !value)} />
+              <Hand cards={self.hand} selectedIds={selection.slots} onSelect={pickCard} disabled={locked} swapping={swapping} />
+              {swapCandidate && <SwapConfirmDialog card={swapCandidate} cost={swapCost} score={selfScore} disabled={disabled}
+                onConfirm={confirmSwap} onCancel={() => setSwapCandidateId(null)} />}
               <SubmissionBar prompt={round.prompt} clock={<PhaseClock snapshot={snapshot} announce={false} compact />} slots={slotCards} activeIndex={selection.activeIndex}
                 activate={activateSlot} move={moveSelection} remove={removeSelection}
                 locked={locked} clear={() => { setSelection(emptySelection(round.prompt.pick)); playSound("clear"); }} submit={() => submit(round.id, selectedCards)} onHeight={setDockHeight} />

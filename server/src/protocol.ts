@@ -1,5 +1,7 @@
 import type { ClientMessage } from "../../shared/protocol";
-import { NICKNAME_LENGTH, PHASE_TIME_LIMITS, PICK_RANGE, RESULT_INTERVALS, TARGET_SCORE_RANGE } from "../../shared/protocol";
+import {
+  NICKNAME_LENGTH, PHASE_TIME_LIMITS, PICK_RANGE, RESULT_INTERVALS, SWAP_COSTS, TARGET_SCORE_RANGE,
+} from "../../shared/protocol";
 import { MAX_CARD_ID_LENGTH } from "./cards";
 import { requireRule, RuleError } from "./errors";
 import { isBoundedString, isIntegerInRange, isRecord } from "./guards";
@@ -16,7 +18,7 @@ const PONG_ENVELOPE_KEYS = ["type", "payload"];
 type MessageType = ClientMessage["type"];
 type FieldName =
   | "nickname" | "targetScore" | "mode" | "code" | "token" | "phaseTimeLimitSeconds" | "resultIntervalSeconds"
-  | "toLobby" | "roundId" | "paused" | "cardIds" | "optionId" | "nonce";
+  | "toLobby" | "roundId" | "paused" | "cardIds" | "cardId" | "cost" | "optionId" | "nonce";
 type Payload = Record<string, unknown>;
 type FieldValidator = (payload: Payload, messageType: MessageType) => void;
 
@@ -28,6 +30,7 @@ const payloadKeys: Record<MessageType, readonly FieldName[]> = {
   "game.pause": ["roundId", "paused"],
   "round.advance": ["roundId"],
   "round.submit": ["roundId", "cardIds"], "round.judge": ["roundId", "optionId"],
+  "round.swap": ["roundId", "cardId", "cost"],
   "connection.pong": ["nonce"],
 };
 
@@ -39,6 +42,8 @@ const fieldValidators: Record<FieldName, FieldValidator> = {
   toLobby: payload => requireRule(payload.toLobby === undefined || typeof payload.toLobby === "boolean", "INVALID_MESSAGE"),
   mode: payload => requireRule(payload.mode === undefined || payload.mode === "private" || payload.mode === "test", "INVALID_MESSAGE"),
   cardIds: validateCardIds,
+  cardId: payload => requireBoundedString(payload.cardId, MAX_CARD_ID_LENGTH),
+  cost: payload => requireRule(SWAP_COSTS.some(cost => cost === payload.cost), "INVALID_MESSAGE"),
   nickname: normalizeNickname,
   code: normalizeRoomCode,
   token: payload => requireBoundedString(payload.token, MAX_TOKEN_LENGTH),

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  NICKNAME_LENGTH, TARGET_SCORE_RANGE,
-  type CommandPayloads, type CommandSuccess, type CommandType, type ErrorCode, type FeatureFlags,
+  NICKNAME_LENGTH, SWAP_COST_POINTS, TARGET_SCORE_RANGE,
+  type CardSwapNotice, type CommandPayloads, type CommandSuccess, type CommandType, type ErrorCode, type FeatureFlags,
   type ServerEvent, type SessionCredential, type Snapshot,
 } from "../../../shared/protocol";
 import { logger } from "./logger";
+import { pointsLabel } from "../points";
 import { createGameSoundTracker, type SoundName } from "../audio/state";
 import { playSound, stopSounds } from "../audio/player";
 
@@ -65,7 +66,16 @@ const errors: Record<ErrorCode, string> = {
   CONNECTION_REPLACED: "Sua sessão foi aberta em outra conexão.",
   REQUEST_ID_REUSED: "Não foi possível repetir a ação. Tente novamente.",
   INTERNAL_ERROR: "Ocorreu um erro ao concluir a ação. Tente novamente.",
+  JUDGE_CANNOT_SWAP: "O juiz não troca cartas nesta rodada.",
+  NOT_ENOUGH_POINTS: `Você precisa de pelo menos ${pointsLabel(SWAP_COST_POINTS)} para trocar uma carta.`,
+  SWAP_COST_CHANGED: "O custo da troca mudou. Confira e confirme de novo.",
 };
+
+function swapNoticeText(notice: CardSwapNotice, selfPlayerId: string | undefined): string {
+  const cost = pointsLabel(SWAP_COST_POINTS);
+  if (notice.playerId === selfPlayerId) return `Você trocou uma carta e pagou ${cost}.`;
+  return `${notice.nickname} trocou uma carta e perdeu ${cost}.`;
+}
 
 function isSessionCredential(value: unknown): value is SessionCredential {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -257,6 +267,10 @@ export function useGameConnection() {
         case "round.cancelled":
           logger.info("round.cancelled", { roomCode: message.roomCode, roundId: message.payload.roundId });
           setNotice(message.payload.reason);
+          return;
+        case "card.swapped":
+          logger.info("card.swapped", { roomCode: message.roomCode, roundId: message.payload.roundId, playerId: message.payload.playerId });
+          setNotice(swapNoticeText(message.payload, sessionRef.current?.playerId));
           return;
         case "room.closed":
           logger.info("room.closed", { roomCode: sessionRef.current?.roomCode });

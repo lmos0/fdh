@@ -8,6 +8,7 @@ export const MAX_CARD_ID_LENGTH = 100;
 const MAX_CARD_TEXT_LENGTH = 500;
 const DEFAULT_PICK = 1;
 const DEFAULT_DRAW = 0;
+const SWAP_RESERVE_CARDS = 1;
 
 export function shuffled<T>(items: readonly T[]): T[] {
   const result = [...items];
@@ -56,10 +57,13 @@ function readPromptRules(pick: unknown, draw: unknown): { pick: number; draw: nu
   return { pick, draw };
 }
 
-/** Garante cartas para a mesa cheia, inclusive quando todos compram o máximo de extras. */
+/**
+ * Garante cartas para a mesa cheia, inclusive quando todos compram o máximo de extras,
+ * e sobra ao menos uma no monte para quem troca uma carta da mão.
+ */
 function validateCatalogSize(cards: ReadonlyMap<string, Card>, promptIds: string[], responseIds: string[]): void {
   const maxDraw = Math.max(DEFAULT_DRAW, ...promptIds.map(id => promptDraw(cards.get(id))));
-  const minimumResponses = MAX_PLAYERS * HAND_SIZE + (MAX_PLAYERS - 1) * maxDraw;
+  const minimumResponses = MAX_PLAYERS * HAND_SIZE + (MAX_PLAYERS - 1) * maxDraw + SWAP_RESERVE_CARDS;
   if (!promptIds.length || responseIds.length < minimumResponses) {
     throw new Error(`São necessárias perguntas e pelo menos ${minimumResponses} respostas.`);
   }

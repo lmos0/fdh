@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { HISTORY_LIMIT, isGameInProgress, MIN_PLAYERS } from "../../shared/protocol";
+import { HISTORY_LIMIT, isGameInProgress, MIN_PLAYERS, SWAP_COST_POINTS, type SwapCost } from "../../shared/protocol";
 import { fillPlayerPlaceholders, hasPlayerPlaceholder } from "../../shared/prompts";
 import { draw, HAND_SIZE, makeDeck, shuffled } from "./cards";
 import { requireRule } from "./errors";
@@ -171,6 +171,7 @@ export function restartGame(room: GameRoom, catalog: Catalog, now: number, toLob
   for (const player of room.players.values()) {
     player.score = 0;
     player.hand = [];
+    player.freeSwapUsed = false;
   }
   room.playerOrder = room.playerOrder.filter(id => room.players.has(id));
   room.pendingBotAction = null;
@@ -204,6 +205,43 @@ export function submitCards(room: GameRoom, player: Player, roundId: string, car
   if (round.submissions.size === round.respondentPlayerIds.length) {
     beginJudging(room, round, now);
   }
+}
+
+export function swapCostFor(player: Player): SwapCost {
+  return player.freeSwapUsed ? "point" : "free";
+}
+
+function canAffordSwap(player: Player, cost: SwapCost): boolean {
+  return cost === "free" || player.score >= SWAP_COST_POINTS;
+}
+
+function validateSwap(round: Round, player: Player, cardId: string, cost: SwapCost): void {
+  requireRule(player.id !== round.judgePlayerId, "JUDGE_CANNOT_SWAP");
+  requireRule(!round.submissions.has(player.id), "ALREADY_SUBMITTED");
+  requireRule(round.respondentPlayerIds.includes(player.id), "INVALID_PHASE");
+  requireRule(player.hand.includes(cardId), "CARD_NOT_IN_HAND");
+  requireRule(cost === swapCostFor(player), "SWAP_COST_CHANGED");
+  requireRule(canAffordSwap(player, cost), "NOT_ENOUGH_POINTS");
+}
+
+function chargeSwap(player: Player, cost: SwapCost): void {
+  if (cost === "free") {
+    player.freeSwapUsed = true;
+    return;
+  }
+  player.score -= SWAP_COST_POINTS;
+}
+
+export function swapCard(room: GameRoom, player: Player, roundId: string, cardId: string, cost: SwapCost): GameNotice[] {
+  const round = activeRound(room, roundId, "submitting");
+  validateSwap(round, player, cardId, cost);
+  // Comprar antes de descartar: a carta devolvida nunca volta na mesma troca.
+  const replacement = draw(room.game.responseDeck);
+  player.hand[player.hand.indexOf(cardId)] = replacement;
+  room.game.responseDeck.discardPile.push(cardId);
+  chargeSwap(player, cost);
+  if (cost === "free") return [];
+  return [{ type: "card.swapped", payload: { roundId: round.id, playerId: player.id, nickname: player.nickname } }];
 }
 
 function beginJudging(room: GameRoom, round: Round, now: number): void {

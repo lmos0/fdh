@@ -153,6 +153,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 - Antes de cada rodada, as mãos voltam a sete cartas e recebem os extras da nova pergunta. Extras não utilizados de rodadas canceladas são descartados, sem acumular.
 - O haiku usa três cartas como três linhas; o jogo não valida métrica ou sílabas.
 - Respostas enviadas não podem ser trocadas.
+- **Troca de carta:** na fase de respostas, antes de enviar, quem não é juiz pode descartar uma carta da mão e comprar outra do monte, na mesma posição. A primeira troca de cada participante na partida é **gratuita**; as seguintes custam **1 ponto** do placar e exigem ter pelo menos 1 ponto, sem limite por rodada. Toda troca pede confirmação: a primeira avisa que usa a única troca gratuita da partida; as pagas avisam o custo. Trocas pagas são anunciadas a todos (apenas quem trocou, sem revelar cartas); a gratuita é silenciosa. Não é possível trocar durante pausa, no julgamento ou no resultado. Reiniciar a partida devolve a troca gratuita.
 - O juiz escolhe entre opções embaralhadas sem autoria.
 - O vencedor recebe um ponto; o resultado fica visível por **15 segundos por padrão**. No lobby, o anfitrião escolhe 5, 10, 15, 20 ou 30 segundos, ou **avanço apenas pelo anfitrião**. Ele também pode antecipar o avanço de um resultado com intervalo automático. A contagem para a próxima rodada fica visível.
 - Vence quem atingir a meta, configurável entre 3 e 20 pontos; padrão 5.
@@ -172,6 +173,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 - Toque em um espaço para escolher qual substituir e depois em outra carta da mão. As demais cartas não são bloqueadas quando a combinação está cheia. As setas movem a carta do espaço ativo para antes/depois; **✕** remove só aquela carta; **Limpar** esvazia tudo. Todos os espaços precisam estar preenchidos antes de enviar, e a barra avisa quantas cartas faltam.
 - Cartas disponíveis têm acabamento de papel e sombra curta; foco/hover elevam levemente; selecionadas ganham borda forte, elevação e o número da ordem no canto. A combinação enviada fica agrupada com selo “Enviada”; a vencedora recebe moldura e destaque “+1 ponto”. No celular não há leque nem sobreposição entre cartas.
 - A mão mantém duas colunas mesmo em 320px, com cartas mais compactas e texto completo. Controles têm alvo de toque mínimo de 44px.
+- Para trocar uma carta da mão, toque em **Trocar carta** (a legenda mostra se a troca é grátis ou quanto custa) e depois na carta a descartar. Um diálogo pede confirmação; **Esc** ou **Cancelar** desiste sem custo. Se a carta trocada estava na combinação, o espaço dela fica vazio.
 - **Após enviar, não será possível alterar.** Antes de enviar, a edição é local; servidor continua validando quantidade, cartas únicas, propriedade e ordem.
 
 ### Mesa, revelação e navegação
@@ -232,7 +234,7 @@ Durante envio, somente a contagem global é pública. No julgamento, opções t�
 
 Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem informar `pick` (1–3, padrão 1) e `draw` (0–2, padrão 0). Os marcadores no texto são visuais; as regras usam esses campos, não contam lacunas. IDs devem ser únicos entre ambos os arquivos. O catálogo atual tem 121 perguntas e 662 respostas.
 
-O catálogo é validado antes de o servidor iniciar: precisa de pelo menos uma pergunta e `8 × 7 + 7 × maior draw` respostas. Com compra de duas cartas extras, o mínimo é 70, garantindo cartas suficientes para oito jogadores.
+O catálogo é validado antes de o servidor iniciar: precisa de pelo menos uma pergunta e `8 × 7 + 7 × maior draw + 1` respostas. Com compra de duas cartas extras, o mínimo é 71, garantindo cartas suficientes para oito jogadores e ao menos uma no monte para a troca de carta.
 
 Cada sala mantém suas próprias pilhas de IDs; os textos são compartilhados no processo. Cartas em mãos ou rodadas ativas nunca voltam ao monte. Descartes são reembaralhados quando necessário.
 
@@ -259,9 +261,10 @@ Comandos JSON possuem `type`, `requestId` e `payload`. O servidor responde `comm
 | `game.restart` | `toLobby?` (booleano opcional) | Anfitrião, após o fim da partida. Com `toLobby: true` volta ao lobby; caso contrário reinicia na mesma sala com 3–8 pessoas conectadas. |
 | `round.submit` | `roundId`, `cardIds` em ordem | Não juiz, envio, quantidade exata, cartas próprias distintas, sem resposta prévia. |
 | `round.judge` | `roundId`, `optionId` | Juiz, julgamento, opção atual. |
+| `round.swap` | `roundId`, `cardId`, `cost` (`free` ou `point`) | Não juiz, fase de respostas sem pausa, antes de enviar, carta própria. `cost` é o custo confirmado na tela e precisa coincidir com o atual; `point` exige pelo menos 1 ponto. |
 | `connection.pong` | `nonce` | Heartbeat pendente da conexão. |
 
-Eventos: `server.config`, `command.ok`, `command.error`, `state.snapshot`, `round.result`, `round.cancelled`, `session.replaced`, `room.closed`, `server.restarting` e `connection.ping`.
+Eventos: `server.config`, `command.ok`, `command.error`, `state.snapshot`, `round.result`, `round.cancelled`, `card.swapped` (troca paga: `roundId`, `playerId`, `nickname`, sem cartas), `session.replaced`, `room.closed`, `server.restarting` e `connection.ping`.
 
 `server.config` é enviado ao abrir a conexão e expõe apenas `features.botTestMode` como booleano. Nenhuma variável de ambiente bruta ou segredo é enviado. Configuração não é um comando aceito do cliente; a autorização do modo de teste continua sendo validada no servidor.
 
@@ -269,7 +272,7 @@ Eventos: `server.config`, `command.ok`, `command.error`, `state.snapshot`, `roun
 
 O snapshot inclui `serverNow`, `room.collectivelyPaused`, `room.history`, `round.deadlineAt`/`remainingPhaseMs` e `round.nextRoundAt`/`remainingResultMs`. Durante pausa, o deadline fica `null` e o restante é congelado em milissegundos. “Sem limite”/resultado manual não têm deadline nem restante. A indicação `room.paused` combina as pausas coletiva e de desconexão. Histórico é limitado a 30 entradas para manter o estado e os snapshots limitados.
 
-O snapshot inclui `round.prompt.pick` e `draw`. `self.submittedResponses` preserva as cartas enviadas em ordem. Opções de julgamento usam `id` aleatório e `responses` (textos ordenados, sem IDs originais ou autoria). O resultado usa `responseTexts` para a combinação vencedora.
+O snapshot inclui `round.prompt.pick` e `draw`. `self.submittedResponses` preserva as cartas enviadas em ordem. `self.freeSwapAvailable` indica se a troca gratuita da partida ainda está disponível; não aparece para os outros participantes. Opções de julgamento usam `id` aleatório e `responses` (textos ordenados, sem IDs originais ou autoria). O resultado usa `responseTexts` para a combinação vencedora.
 
 O estado público inclui `room.mode` e `players[].isBot`. Bots não possuem credenciais de sessão. Salas de teste recusam `room.join` com `TEST_ROOM_PRIVATE`; somente a sessão humana original pode reconectar. O payload não permite definir bots, IDs ou número de participantes automáticos arbitrariamente.
 

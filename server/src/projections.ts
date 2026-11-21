@@ -35,6 +35,7 @@ export function projectSnapshot(room: GameRoom, playerId: string, catalog: Catal
     self: {
       playerId, hand: player.hand.map(cardView), submitted: !!submission,
       submittedResponses: submission ? submission.cardIds.map(cardView) : [],
+      freeSwapAvailable: !player.freeSwapUsed,
     },
   };
 }

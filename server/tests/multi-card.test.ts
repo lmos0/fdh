@@ -118,9 +118,9 @@ describe("perguntas e respostas compostas", () => {
     }
   });
 
-  test("recicla o catálogo mínimo de 70 respostas em rodadas triplas", () => {
+  test("recicla o catálogo mínimo de 71 respostas em rodadas triplas", () => {
     const minimum = createCatalog([{ id: "multi", text: "Faça uma combinação.", pick: 3, draw: 2 }],
-      catalog.responseIds.slice(0, 70).map(id => ({ id, text: catalog.cards.get(id)!.text })));
+      catalog.responseIds.slice(0, 71).map(id => ({ id, text: catalog.cards.get(id)!.text })));
     const h = table(8, 20, 50, minimum);
     h.command("c0", "game.start", {});
     for (let iteration = 0; iteration < 12; iteration++) {
@@ -137,11 +137,11 @@ describe("perguntas e respostas compostas", () => {
   });
 
   test("rejeita metadados inválidos e baralho insuficiente para os extras", () => {
-    const responses = catalog.responseIds.slice(0, 70).map(id => ({ id, text: catalog.cards.get(id)!.text }));
+    const responses = catalog.responseIds.slice(0, 71).map(id => ({ id, text: catalog.cards.get(id)!.text }));
     for (const metadata of [{ pick: 0 }, { pick: 4 }, { pick: 1.5 }, { draw: 3 }, { draw: -1 }, { draw: "2" }]) {
       expect(() => createCatalog([{ id: "q", text: "Pergunta", ...metadata }], responses)).toThrow();
     }
-    expect(() => createCatalog([{ id: "q", text: "Pergunta", pick: 3, draw: 2 }], responses.slice(0, 69))).toThrow();
+    expect(() => createCatalog([{ id: "q", text: "Pergunta", pick: 3, draw: 2 }], responses.slice(0, 70))).toThrow();
     expect(createCatalog([{ id: "q", text: "Pergunta sem lacunas" }], responses).cards.get("q")).toMatchObject({ pick: 1, draw: 0 });
   });
 });

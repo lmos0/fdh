@@ -8,6 +8,13 @@ import { startServer } from "../server/src/connections";
 // Navegadores: bunx playwright install chromium webkit
 const catalog = await loadCatalog();
 const logger = createLogger({ level: "silent" });
+// Rótulos e contagens derivados do catálogo real, para não quebrar quando cartas são adicionadas.
+const responsesTab = `Respostas (${catalog.responseIds.length})`;
+const promptsTab = `Perguntas / prompts (${catalog.promptIds.length})`;
+const triplePromptCount = catalog.promptIds.filter(id => {
+  const card = catalog.cards.get(id);
+  return card?.kind === "prompt" && card.pick === 3;
+}).length;
 const app = startServer({ catalog, port: 0, hostname: "127.0.0.1", logger, botTestModeEnabled: false });
 const gameApp = startServer({ catalog: { ...catalog, promptIds: ["p17", "p77", "p89"] },
   port: 0, hostname: "127.0.0.1", logger, botTestModeEnabled: true });
@@ -109,11 +116,11 @@ async function layoutMatrix(browser: Browser, deviceName: string) {
         await page.getByRole("button", { name: "Entrar com código", exact: true }).tap();
         await audit(page, `${deviceName} / ${theme} / ${viewport.width} / entrada`);
         await page.goto(`${origin}/cards`);
-        await page.getByRole("button", { name: "Respostas (459)", exact: true }).waitFor();
+        await page.getByRole("button", { name: responsesTab, exact: true }).waitFor();
         await audit(page, `${deviceName} / ${theme} / ${viewport.width} / respostas`);
-        await page.getByRole("button", { name: "Perguntas / prompts (90)", exact: true }).tap();
+        await page.getByRole("button", { name: promptsTab, exact: true }).tap();
         await page.getByLabel("Cartas por resposta").selectOption("3");
-        assert(await page.locator(".catalog-card").count() === 2, "Filtro de perguntas triplas incorreto");
+        assert(await page.locator(".catalog-card").count() === triplePromptCount, "Filtro de perguntas triplas incorreto");
         await audit(page, `${deviceName} / ${theme} / ${viewport.width} / perguntas`);
       }
     }
@@ -137,7 +144,7 @@ async function layoutMatrix(browser: Browser, deviceName: string) {
 
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto(`${origin}/cards`);
-    await page.getByRole("button", { name: "Respostas (459)", exact: true }).waitFor();
+    await page.getByRole("button", { name: responsesTab, exact: true }).waitFor();
     const search = page.getByLabel("Buscar por texto ou ID");
     await search.tap();
     await search.fill("r262");

@@ -54,8 +54,9 @@ describe("placeholder de nome de jogador nas perguntas", () => {
     });
     expect(h.view("c1_reconnected").room.round!.prompt.text).toBe(resolved);
 
-    const judge = h.judgeConnection();
+    // O juiz pode ser justamente quem reconectou; a visão de "c1" ficou parada na desconexão.
     const connections = h.connections.map(id => id === "c1" ? "c1_reconnected" : id);
+    const judge = connections.find(id => h.view(id).self.playerId === h.view(id).room.round!.judgePlayerId)!;
     for (const connectionId of connections) {
       const snapshot = h.view(connectionId);
       if (snapshot.self.playerId === snapshot.room.round!.judgePlayerId) continue;

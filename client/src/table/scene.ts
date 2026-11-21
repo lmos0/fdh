@@ -1,5 +1,5 @@
 import * as T from "three";
-import type { TableModel } from "./model";
+import { SWAP_DECK_ACTION, type TableModel } from "./model";
 import { CARD_ASPECT, cardPrint, type PrintKind } from "./print";
 import { createTextureBundle, seeded } from "./textures";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
@@ -38,6 +38,8 @@ const leanOut = (lean: number) => new T.Vector3(0, Math.cos(lean), Math.sin(lean
 const WHITE_DECK = { x: -3.85, z: -0.35, yaw: -0.1, h: 0.34 };
 const BLACK_DECK = { x: -2.45, z: -0.6, yaw: 0.08, h: 0.24 };
 const PILE = { x: 2.4, z: -0.4 };
+/** With the swap open, the top card of the response deck lifts and tips up as if being drawn. */
+const DECK_LID_LIFT = 0.16, DECK_LID_TILT = 0.22;
 
 type Film = ReturnType<typeof cardPrint>;
 interface Spawn { x: number; y: number; z: number; roll: number }
@@ -215,18 +217,28 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     block.castShadow = block.receiveShadow = true;
     group.add(block);
     const jitter = seeded(seed);
-    for (let i = 0; i < 2; i++) {
-      const loose = new T.Group();
-      loose.position.set((jitter() - 0.5) * 0.06, spec.h + bevel * 2 + LAY + i * 0.014, (jitter() - 0.5) * 0.06);
-      loose.rotation.set(FLAT, (jitter() - 0.5) * 0.12, 0, "YXZ");
-      sheet(loose, top, top);
-      group.add(loose);
-    }
+    const loose = [0, 1].map(i => {
+      const card = new T.Group();
+      card.position.set((jitter() - 0.5) * 0.06, spec.h + bevel * 2 + LAY + i * 0.014, (jitter() - 0.5) * 0.06);
+      card.rotation.set(FLAT, (jitter() - 0.5) * 0.12, 0, "YXZ");
+      sheet(card, top, top);
+      group.add(card);
+      return card;
+    });
     addContactShadow(group, plane, shadowMatCard, 0, 0.003, 0, CW * 1.3, CH * 1.22);
-    return spec.h + bevel * 2 + 0.03;
+    const lid = loose[loose.length - 1]!;
+    return { height: spec.h + bevel * 2 + 0.03, group, lid, lidRest: lid.position.y, lidTilt: lid.rotation.x };
   }
-  const whiteTop = deck(WHITE_DECK, reverseMat, deckEdgeWhite, 7);
-  const blackTop = deck(BLACK_DECK, promptReverseMat, deckEdgeBlack, 11);
+  const responseDeck = deck(WHITE_DECK, reverseMat, deckEdgeWhite, 7);
+  const whiteTop = responseDeck.height;
+  // Invisible and larger than the deck: a comfortable touch target that also covers the raised lid.
+  const deckTargetHeight = whiteTop + DECK_LID_LIFT + 0.3;
+  const deckTarget = new T.Mesh(shape(new T.BoxGeometry(CW * 1.6, deckTargetHeight, CH * 1.4)),
+    own(new T.MeshBasicMaterial({ visible: false })));
+  deckTarget.position.y = deckTargetHeight / 2;
+  deckTarget.userData.action = SWAP_DECK_ACTION;
+  responseDeck.group.add(deckTarget);
+  const blackTop = deck(BLACK_DECK, promptReverseMat, deckEdgeBlack, 11).height;
 
   function block(parent: T.Object3D, w: number, h: number, d: number, at: T.Vector3, tiltX = 0) {
     const m = new T.Mesh(shape(new RoundedBoxGeometry(w, h, d, 2, Math.min(h, d) * 0.3)), mahoganyMat);
@@ -387,10 +399,13 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     faceDown?: boolean;
     /** Extra cards of the same play fly to this pile card and are removed when they arrive. */
     leaving?: string;
+    /** A card swapped out of the rack flies face down onto the response deck and is removed there. */
+    returning?: boolean;
   }
   const pieces = new Map<string, Piece>();
   let hittable: T.Object3D[] = [];
   let frame = 0, disposed = false, overhead = false, initial = true, hovered: string | undefined;
+  let deckOpen = false;
 
   const frameTarget = new T.Vector3(0, 0.3, 0.8);
   const camPos = new T.Vector3();
@@ -449,7 +464,7 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     }
 
     for (const [key, p] of pieces) {
-      if (p.leaving && p.group.position.distanceToSquared(p.pos) < 0.0004) { drop(key, p); continue; }
+      if ((p.leaving || p.returning) && p.group.position.distanceToSquared(p.pos) < 0.0004) { drop(key, p); continue; }
       const lifted = Boolean(p.action && p.action === hovered);
       goal.copy(p.pos);
       let tilt = p.tilt;
@@ -482,8 +497,25 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       (p.shadow.material as T.MeshBasicMaterial).opacity = 0.5 / (1 + height * 1.6);
     }
 
+    if (settleDeckLid(snap)) moving = true;
     renderer.render(scene, camera);
     if (moving) invalidate();
+  }
+
+  /** Returns true while the lid is still gliding towards its goal. */
+  function settleDeckLid(snap: boolean) {
+    const { lid, lidRest, lidTilt } = responseDeck;
+    const raised = deckOpen || hovered === SWAP_DECK_ACTION;
+    const y = lidRest + (raised ? DECK_LID_LIFT : 0);
+    const tilt = lidTilt + (raised ? DECK_LID_TILT : 0);
+    if (snap || (Math.abs(lid.position.y - y) < 0.001 && Math.abs(lid.rotation.x - tilt) < 0.002)) {
+      lid.position.y = y;
+      lid.rotation.x = tilt;
+      return false;
+    }
+    lid.position.y += (y - lid.position.y) * 0.2;
+    lid.rotation.x += (tilt - lid.rotation.x) * 0.2;
+    return true;
   }
 
   // Frame the play area for any aspect ratio by finding the closest camera distance that fits it.
@@ -552,6 +584,16 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   const observer = new ResizeObserver(() => resize(true));
   observer.observe(canvas);
 
+  function returnToDeck(p: Piece) {
+    p.returning = true;
+    p.pos.set(WHITE_DECK.x, whiteTop, WHITE_DECK.z);
+    p.tilt = FLAT;
+    p.yaw = WHITE_DECK.yaw;
+    p.roll = Math.PI;
+    p.action = undefined;
+    delete p.face.userData.action;
+  }
+
   function drop(key: string, p: Piece) {
     scene.remove(p.group, p.shadow);
     (p.shadow.material as T.Material).dispose();
@@ -599,6 +641,7 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       p.lift = lift;
       p.liftTilt = lift === flatLift ? 0.3 : 0;
       p.inRack = lift === rackLift;
+      p.returning = undefined;
       p.order = order;
       p.action = action;
       if (action) {
@@ -667,9 +710,14 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
       });
     }
 
+    deckOpen = model.swap === "active";
+    if (model.swap !== "off") hittable.push(deckTarget);
+
     for (const [k, p] of pieces) {
       if (live.has(k)) continue;
       const landing = p.leaving && pieces.get(p.leaving);
+      // While the hand stays on the rack, a card that vanishes from it was swapped: it goes back to the deck.
+      const swappedOut = model.zone === "hand" && p.inRack && !p.leaving;
       if (landing && !reduce.matches) {
         p.pos.copy(landing.pos).y += 0.012;
         p.tilt = landing.tilt;
@@ -677,9 +725,10 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
         p.roll = Math.PI;
         p.action = undefined;
         delete p.face.userData.action;
-      } else drop(k, p);
+      } else if (swappedOut && !reduce.matches) returnToDeck(p);
+      else drop(k, p);
     }
-    for (const p of pieces.values()) if (p.faceDown || p.leaving) used.add(p.printKey);
+    for (const p of pieces.values()) if (p.faceDown || p.leaving || p.returning) used.add(p.printKey);
     for (const [k, art] of covers) if (!used.has(k)) { art.texture.dispose(); art.mat.dispose(); covers.delete(k); }
     if (hovered && !hittable.some(h => h.userData.action === hovered)) hovered = undefined;
     initial = false;

@@ -9,12 +9,12 @@ import { PhaseClock } from "../components/PhaseClock";
 import { SubmissionBar } from "../components/SubmissionBar";
 import { WinningHistory } from "../components/WinningHistory";
 import { chooseCard, dropCard, emptySelection, moveCard } from "../selection";
-import { SwapConfirmDialog, SwapToggle } from "../components/CardSwap";
+import { canAffordSwap, SwapConfirmDialog, SwapToggle } from "../components/CardSwap";
 import { RoundTable } from "../components/RoundTable";
 import { PlayerAvatar } from "../components/PlayerAvatar";
 import { ResultParticles } from "../components/ResultParticles";
 import { TableStage } from "../table/TableStage";
-import { tableModel } from "../table/model";
+import { SWAP_DECK_ACTION, tableModel, type TableSwap } from "../table/model";
 
 const SCROLL_MARGIN_PX = 32;
 
@@ -97,7 +97,9 @@ export function GameScreen({ snapshot, disabled, submit, swap, judge, leave, pau
   const swapCost: SwapCost = self.freeSwapAvailable ? "free" : "point";
   const selfScore = room.players.find(player => player.id === self.playerId)?.score ?? 0;
   const swapCandidate = canSwap && !room.paused ? self.hand.find(card => card.id === swapCandidateId) : undefined;
+  const tableSwap: TableSwap = swapping ? "active" : canSwap && canAffordSwap(swapCost, selfScore) ? "ready" : "off";
   function pickCard(id: string) {
+    if (id === SWAP_DECK_ACTION) return setSwapMode(value => !value);
     if (!swapping) return toggleCard(id);
     playSound("select");
     setSwapCandidateId(id);
@@ -128,7 +130,7 @@ export function GameScreen({ snapshot, disabled, submit, swap, judge, leave, pau
     setSelectedOption(id);
   }
   return <div ref={layout} className={`room-layout game-layout phase-${room.phase}`} style={{ "--submission-dock-height": `${dockHeight}px` } as CSSProperties}>
-    <TableStage model={tableModel(snapshot, selection.slots, selectedOption, disabled, promptAnswers)}
+    <TableStage model={tableModel(snapshot, selection.slots, selectedOption, disabled, promptAnswers, tableSwap)}
       title={`Mesa ${room.code}`} pick={room.phase === "judging" ? inspectOption : pickCard} />
     <div className="table-side">
       <RoundTable snapshot={snapshot} disabled={disabled} pause={pause} answers={promptAnswers} />

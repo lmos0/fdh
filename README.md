@@ -77,7 +77,7 @@ O botão de sol/lua no cabeçalho alterna entre tema claro e escuro, no jogo e n
 | `bun run typecheck` | Verificação de tipos do servidor e cliente. |
 | `bun test` | Testes de regras, privacidade, protocolo e HTTP/WebSocket reais. |
 | `bun run test:mobile` | Build e validação mobile em Chromium/Android e WebKit/iPhone. |
-| `bun run test:3d` | Build e partida com seleção pelo cenário WebGL, troca de câmera e perda do contexto em Chromium. |
+| `bun run test:3d` | Build e partida com seleção pelo cenário WebGL, troca de carta pelo monte, troca de câmera e perda do contexto em Chromium. |
 | `bun run test:audio` | Build e validação de áudio em Chromium e WebKit, com nós Web Audio reais. |
 | `bun run build` | Gera `client/dist`. |
 | `bun run start` | Servidor de produção na porta 3000 ou em `PORT`. |
@@ -173,7 +173,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 - Toque em um espaço para escolher qual substituir e depois em outra carta da mão. As demais cartas não são bloqueadas quando a combinação está cheia. As setas movem a carta do espaço ativo para antes/depois; **✕** remove só aquela carta; **Limpar** esvazia tudo. Todos os espaços precisam estar preenchidos antes de enviar, e a barra avisa quantas cartas faltam.
 - Cartas disponíveis têm acabamento de papel e sombra curta; foco/hover elevam levemente; selecionadas ganham borda forte, elevação e o número da ordem no canto. A combinação enviada fica agrupada com selo “Enviada”; a vencedora recebe moldura e destaque “+1 ponto”. No celular não há leque nem sobreposição entre cartas.
 - A mão mantém duas colunas mesmo em 320px, com cartas mais compactas e texto completo. Controles têm alvo de toque mínimo de 44px.
-- Para trocar uma carta da mão, toque em **Trocar carta** (a legenda mostra se a troca é grátis ou quanto custa) e depois na carta a descartar. Um diálogo pede confirmação; **Esc** ou **Cancelar** desiste sem custo. Se a carta trocada estava na combinação, o espaço dela fica vazio.
+- Para trocar uma carta da mão, toque em **Trocar carta** (a legenda mostra se a troca é grátis ou quanto custa) ou no **monte de respostas** da mesa 3D, e depois na carta a descartar, na mão ou no suporte. Com o modo ativo, a carta de cima do monte fica levantada; tocar no monte de novo desiste. Após a confirmação, a carta trocada volta voando para o monte e a nova sai dele. Um diálogo pede confirmação; **Esc** ou **Cancelar** desiste sem custo. Se a carta trocada estava na combinação, o espaço dela fica vazio.
 - **Após enviar, não será possível alterar.** Antes de enviar, a edição é local; servidor continua validando quantidade, cartas únicas, propriedade e ordem.
 
 ### Mesa, revelação e navegação

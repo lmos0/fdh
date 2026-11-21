@@ -22,6 +22,25 @@ async function pickFromTable(page: Page) {
   throw new Error("Nenhuma carta selecionável encontrada na mesa.");
 }
 
+/** Clica no centro da área clicável encontrada na faixa, não na borda, onde o arredondamento do clique erra. */
+async function pickDeck(page: Page) {
+  const canvas = page.locator(".stage-ready canvas");
+  await canvas.scrollIntoViewIfNeeded();
+  const box = await canvas.boundingBox();
+  assert(box);
+  const hits: { x: number; y: number }[] = [];
+  for (let row = .2; row <= .5; row += .03) {
+    for (let col = .05; col <= .6; col += .03) {
+      const x = box.x + box.width * col, y = box.y + box.height * row;
+      await page.mouse.move(x, y);
+      if (await canvas.evaluate(c => c.style.cursor === "pointer")) hits.push({ x, y });
+    }
+  }
+  assert(hits.length > 0, "Monte de respostas não ficou clicável.");
+  const centre = (axis: "x" | "y") => hits.reduce((sum, hit) => sum + hit[axis], 0) / hits.length;
+  await page.mouse.click(centre("x"), centre("y"));
+}
+
 const catalog = await loadCatalog();
 const app = startServer({ catalog: { ...catalog, promptIds: ["p17"] }, port: 0, hostname: "127.0.0.1",
   logger: createLogger({ level: "silent" }), botTestModeEnabled: true });
@@ -76,6 +95,19 @@ try {
     await page.getByRole("button", { name: "Próxima rodada" }).click();
     await page.getByRole("heading", { name: "Sua mão" }).waitFor();
     await camera.click();
+    // Troca pelo monte: na fase de respostas só o monte fica clicável acima do suporte da mão.
+    const handBefore = await page.locator(".hand-grid .answer-card > span").allTextContents();
+    await pickDeck(page);
+    await page.locator('.swap-toggle[aria-pressed="true"]').waitFor();
+    await page.locator(".stage-foot").getByText(/Monte aberto/).waitFor();
+    await pickFromTable(page);
+    const dialog = page.getByRole("dialog", { name: "Trocar esta carta?" });
+    await dialog.getByRole("button", { name: "Usar troca grátis", exact: true }).click();
+    await page.getByText("Sem pontos para trocar", { exact: true }).waitFor();
+    const handAfter = await page.locator(".hand-grid .answer-card > span").allTextContents();
+    assert.equal(handAfter.length, handBefore.length);
+    assert.equal(handAfter.filter((text, index) => text !== handBefore[index]).length, 1);
+    assert.equal(await page.locator(".hand-grid .answer-card.selected").count(), 0);
     await pickFromTable(page);
     await page.locator(".hand-grid .answer-card.selected").waitFor();
     const text = await page.locator(".slot-text").first().textContent();
@@ -88,6 +120,6 @@ try {
     await page.getByRole("button", { name: "Enviar resposta" }).click();
     await page.getByRole("heading", { name: "Julgamento", exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.info("Mesa 3D OK: zoom (Ctrl + rolagem, arrasto, botões), seleção de combinação e carta por raycast, câmeras, resultado e envio após perda de WebGL.");
+    console.info("Mesa 3D OK: zoom (Ctrl + rolagem, arrasto, botões), seleção de combinação e carta por raycast, troca pelo monte, câmeras, resultado e envio após perda de WebGL.");
   } finally { await browser.close(); }
 } finally { await app.stop(); }

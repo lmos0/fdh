@@ -5,6 +5,21 @@ import { createTextureBundle, seeded } from "./textures";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { addContactShadow, buildEnvScene, buildRoomAndTable, createSeatKit, FLOOR, TABLE, TOP } from "./props";
 
+interface CardFinish {
+  bumpScale: number; linenRoughness: boolean; roughness: number; metalness: number;
+  clearcoat: number; clearcoatRoughness: number; envMapIntensity: number; emissiveIntensity: number;
+}
+const PAPER_FINISH = { bumpScale: 0.35, linenRoughness: true, metalness: 0, clearcoatRoughness: 0.5 } as const;
+const BACK_FINISH: CardFinish = { ...PAPER_FINISH, roughness: 0.66, clearcoat: 0.12, envMapIntensity: 0.5, emissiveIntensity: 0.03 };
+const CARD_FINISHES: Record<PrintKind, CardFinish> = {
+  white: { ...PAPER_FINISH, roughness: 0.86, clearcoat: 0, envMapIntensity: 0.25, emissiveIntensity: 0.04 },
+  black: { ...PAPER_FINISH, roughness: 0.9, clearcoat: 0, envMapIntensity: 0.2, emissiveIntensity: 0.08 },
+  back: BACK_FINISH,
+  promptBack: BACK_FINISH,
+  gold: { bumpScale: 0.25, linenRoughness: false, roughness: 0.3, metalness: 0.55, clearcoat: 0.5,
+    clearcoatRoughness: 0.22, envMapIntensity: 1.5, emissiveIntensity: 0.05 },
+};
+
 const ROOM = "#3b2b23";
 /** Big-format cards, 8.4 × 11.8 cm (1 unit = 10 cm), with the 5:7 ratio of real playing cards. */
 const CW = 0.84, CH = CW / CARD_ASPECT;
@@ -120,22 +135,22 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
   shape(bow(backGeo)).translate(0, 0, -STOCK);
 
   function cardMaterial(map: Film, kind: PrintKind) {
-    const gold = kind === "gold", black = kind === "black", back = kind === "back" || kind === "promptBack";
+    const finish = CARD_FINISHES[kind];
     return new T.MeshPhysicalMaterial({
       map,
       alphaTest: 0.5,
       bumpMap: tex.linen.bump,
-      bumpScale: gold ? 0.25 : 0.35,
-      roughnessMap: gold ? undefined : tex.linen.rough,
-      roughness: gold ? 0.3 : black ? 0.9 : back ? 0.66 : 0.86,
-      metalness: gold ? 0.55 : 0,
-      clearcoat: gold ? 0.5 : back ? 0.12 : 0,
-      clearcoatRoughness: gold ? 0.22 : 0.5,
-      envMapIntensity: gold ? 1.5 : back ? 0.5 : black ? 0.2 : 0.25,
+      bumpScale: finish.bumpScale,
+      roughnessMap: finish.linenRoughness ? tex.linen.rough : undefined,
+      roughness: finish.roughness,
+      metalness: finish.metalness,
+      clearcoat: finish.clearcoat,
+      clearcoatRoughness: finish.clearcoatRoughness,
+      envMapIntensity: finish.envMapIntensity,
       // A touch of self-illumination keeps the print readable where the lamp light falls off.
       emissive: 0xffffff,
       emissiveMap: map,
-      emissiveIntensity: black ? 0.08 : gold ? 0.05 : back ? 0.03 : 0.04,
+      emissiveIntensity: finish.emissiveIntensity,
     });
   }
   function staticPrint(kind: PrintKind) {
@@ -227,9 +242,7 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     const up = leanUp(spec.lean), out = leanOut(spec.lean);
     const bottom = new T.Vector3(0, spec.seat, spec.front);
     block(group, length, spec.seat, 0.66, new T.Vector3(0, spec.seat / 2, 0));
-    // Lip in front of the cards' bottom edge
     block(group, length, 0.16, 0.08, new T.Vector3(0, spec.seat + 0.06, spec.front + 0.06));
-    // Back rest the cards lean against
     block(group, length * 0.82, backHeight, 0.06,
       bottom.clone().addScaledVector(up, backHeight / 2 + 0.05).addScaledVector(out, -STOCK - 0.04), spec.lean - Math.PI / 2);
     addContactShadow(group, plane, shadowMatSoft, 0, 0.004, -0.1, length * 1.12, 1.6);
@@ -404,6 +417,7 @@ export function mountTable(canvas: HTMLCanvasElement, pick: (id: string) => void
     compiling = true;
     requestAnimationFrame(() => {
       if (disposed) return;
+      // Falha na pré-compilação só atrasa os shaders para o primeiro quadro; desenhar mesmo assim.
       renderer.compileAsync(scene, camera).catch(() => undefined).then(() => {
         if (disposed) return;
         compiled = true;

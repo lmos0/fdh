@@ -33,6 +33,15 @@ function hash(text: string) {
 
 export type PrintKind = "black" | "white" | "back" | "promptBack" | "gold";
 
+const DEFAULT_INKS = { ink: "#0b0714", spot: "#a80d56" } as const;
+const PRINT_INKS: Record<PrintKind, { ink: string; spot: string }> = {
+  white: DEFAULT_INKS,
+  back: DEFAULT_INKS,
+  promptBack: DEFAULT_INKS,
+  black: { ink: "#ffffff", spot: "#ff72ba" },
+  gold: { ink: "#1e1002", spot: "#6e4000" },
+};
+
 /** High-resolution letterpress-style card art. Corners outside the die-cut stay transparent (alphaTest). */
 export function cardPrint(text: string, label: string, kind: PrintKind, order = 0) {
   const canvas = document.createElement("canvas");
@@ -44,8 +53,7 @@ export function cardPrint(text: string, label: string, kind: PrintKind, order = 
   const promptBack = kind === "promptBack";
   if (promptBack) kind = "back";
   const dark = kind === "black" || kind === "back";
-  const ink = kind === "black" ? "#ffffff" : kind === "gold" ? "#1e1002" : "#0b0714";
-  const spot = kind === "gold" ? "#6e4000" : kind === "black" ? "#ff72ba" : "#a80d56";
+  const { ink, spot } = PRINT_INKS[kind];
 
   if (kind === "gold") {
     const foil = g.createLinearGradient(0, 0, W, H);

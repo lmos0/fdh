@@ -5,9 +5,10 @@ import "./table.css";
 
 type Engine = ReturnType<typeof mountTable>;
 
-// Mirrors MAX_ZOOM in scene.ts; importing it from there would pull three.js into the main bundle.
+// Espelha MAX_ZOOM em scene.ts; importar de lá puxaria o three.js para o bundle principal.
 const MAX_ZOOM = 3.5;
 const STEP = 1.5;
+const HINT_DURATION_MS = 1_800;
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 export function TableStage({ model, pick, title = "Mesa da rodada", preview = false }: {
@@ -26,7 +27,7 @@ export function TableStage({ model, pick, title = "Mesa da rodada", preview = fa
   function showHint(text: string) {
     setHint(text);
     clearTimeout(hintTimer.current);
-    hintTimer.current = window.setTimeout(() => setHint(null), 1800);
+    hintTimer.current = window.setTimeout(() => setHint(null), HINT_DURATION_MS);
   }
 
   useEffect(() => {

@@ -9,10 +9,10 @@ function withPrompt(id: string): Catalog {
 }
 
 describe("perguntas e respostas compostas", () => {
-  test("catálogo contém 76 perguntas simples, 12 duplas e 2 triplas", () => {
+  test("catálogo contém 84 perguntas simples, 12 duplas e 2 triplas", () => {
     const prompts = catalog.promptIds.map(id => catalog.cards.get(id)!);
-    expect(prompts.length).toBe(90);
-    for (const [pick, count] of [[1, 76], [2, 12], [3, 2]]) {
+    expect(prompts.length).toBe(98);
+    for (const [pick, count] of [[1, 84], [2, 12], [3, 2]]) {
       expect(prompts.filter(card => card.kind === "prompt" && card.pick === pick).length).toBe(count);
     }
     for (const id of ["p89", "p90"]) expect(catalog.cards.get(id)).toMatchObject({ pick: 3, draw: 2 });

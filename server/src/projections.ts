@@ -20,7 +20,7 @@ export function projectSnapshot(room: GameRoom, playerId: string, catalog: Catal
       history: structuredClone(room.game.history),
       round: round ? {
         id: round.id, number: round.number, judgePlayerId: round.judgePlayerId,
-        prompt: { ...cardView(round.promptCardId), pick: round.pick, draw: round.draw }, receivedCount: round.submissions.size,
+        prompt: { id: round.promptCardId, text: round.promptText, pick: round.pick, draw: round.draw }, receivedCount: round.submissions.size,
         expectedCount: round.respondentPlayerIds.length,
         options: showOptions ? round.options.map(option => ({
           id: option.id, responses: option.cardIds.map(id => catalog.cards.get(id)!.text),

@@ -22,6 +22,7 @@ export interface Round {
   number: number;
   judgePlayerId: string;
   promptCardId: string;
+  promptText: string;
   pick: number;
   draw: number;
   respondentPlayerIds: string[];

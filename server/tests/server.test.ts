@@ -123,8 +123,8 @@ describe("HTTP e WebSocket reais", () => {
     const { origin } = app(catalog);
     const response = await fetch(origin + "/api/cards");
     const data = await response.json() as CardCatalogView;
-    expect(data.prompts.length).toBe(90);
-    expect(data.responses.length).toBe(459);
+    expect(data.prompts.length).toBe(catalog.promptIds.length);
+    expect(data.responses.length).toBe(catalog.responseIds.length);
     expect(Object.keys(data).sort()).toEqual(["prompts", "responses"]);
     expect(data.prompts.find(card => card.id === "p89")).toMatchObject({ pick: 3, draw: 2 });
     for (const card of data.responses) expect(Object.keys(card).sort()).toEqual(["id", "text"]);

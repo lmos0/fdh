@@ -6,6 +6,7 @@ const payloadKeys: Record<string, string[]> = {
   "room.create": ["nickname", "targetScore", "mode"], "room.join": ["code", "nickname"],
   "session.resume": ["code", "token"], "room.leave": [],
   "room.configure": ["targetScore", "phaseTimeLimitSeconds", "resultIntervalSeconds"], "game.start": [],
+  "game.restart": ["toLobby"],
   "game.pause": ["roundId", "paused"],
   "round.advance": ["roundId"],
   "round.submit": ["roundId", "cardIds"], "round.judge": ["roundId", "optionId"],
@@ -52,6 +53,8 @@ function validateMessage(message: unknown): ClientMessage {
         (key === "phaseTimeLimitSeconds" ? PHASE_TIME_LIMITS : RESULT_INTERVALS).some(value => value === payload[key]), "INVALID_SETTINGS");
     } else if (key === "paused") {
       requireRule(typeof payload[key] === "boolean", "INVALID_MESSAGE");
+    } else if (key === "toLobby") {
+      requireRule(payload[key] === undefined || typeof payload[key] === "boolean", "INVALID_MESSAGE");
     } else if (key === "mode") {
       requireRule(payload.mode === undefined || payload.mode === "private" || payload.mode === "test", "INVALID_MESSAGE");
     } else if (key === "cardIds") {

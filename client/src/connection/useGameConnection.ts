@@ -244,6 +244,8 @@ export function useGameConnection() {
               // Mesmo marcador autoritativo: sem replay em snapshots duplicados, reconexão ou aba oculta.
               if (sound && ["result", "point", "victory", "judge_confirm", "ending", "judge_ending"].includes(sound) && !document.hidden) {
                 setRevealRoundId(message.payload.room.round?.result?.roundId ?? null);
+              } else if (!message.payload.room.round?.result) {
+                setRevealRoundId(null);
               }
               if (sound) playSound(sound);
               setSnapshot(message.payload);

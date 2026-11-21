@@ -1,4 +1,5 @@
 import { randomInt } from "node:crypto";
+import { fillPlayerPlaceholders, hasPlayerPlaceholder } from "../../shared/prompts";
 import { draw, HAND_SIZE, makeDeck, shuffled } from "./cards";
 import { requireRule } from "./errors";
 import type { Catalog, GameNotice, GameRoom, GameState, Player, Round } from "./types";
@@ -78,10 +79,13 @@ function beginRound(room: GameRoom, judgePlayerId: string, catalog: Catalog, now
       for (let extra = 0; extra < prompt.draw; extra++) player.hand.push(draw(room.game.responseDeck));
     }
   }
+  const promptText = hasPlayerPlaceholder(prompt.text)
+    ? fillPlayerPlaceholders(prompt.text, shuffled([...room.players.values()]).map(player => player.nickname))
+    : prompt.text;
   const number = (room.game.round?.number ?? 0) + 1;
   room.game.round = {
     id: crypto.randomUUID(), number, judgePlayerId,
-    promptCardId, pick: prompt.pick, draw: prompt.draw,
+    promptCardId, promptText, pick: prompt.pick, draw: prompt.draw,
     respondentPlayerIds: [...room.players.keys()].filter(id => id !== judgePlayerId),
     submissions: new Map(), options: [], result: null, cardsSettled: false,
     nextRoundAt: null, remainingResultMs: null,
@@ -101,6 +105,24 @@ export function startGame(room: GameRoom, catalog: Catalog, now: number): void {
   // No teste, começar como juiz garante que a pessoa veja os dois papéis no rodízio.
   const judge = room.mode === "test" ? players.find(player => !player.isBot)! : players[randomInt(players.length)]!;
   beginRound(room, judge.id, catalog, now);
+}
+
+export function restartGame(room: GameRoom, catalog: Catalog, now: number, toLobby = false): void {
+  requireRule(room.game.phase === "finished", "INVALID_PHASE");
+  if (!toLobby) {
+    requireRule(room.players.size >= 3, "NOT_ENOUGH_PLAYERS");
+    requireRule([...room.players.values()].every(p => p.disconnectedAt === null), "PLAYERS_DISCONNECTED");
+  }
+  for (const player of room.players.values()) {
+    player.score = 0;
+    player.hand = [];
+  }
+  room.playerOrder = room.playerOrder.filter(id => room.players.has(id));
+  room.pendingBotAction = null;
+  room.game = initialGame();
+  if (!toLobby) {
+    startGame(room, catalog, now);
+  }
 }
 
 function activeRound(room: GameRoom, roundId: string, phase: "submitting" | "judging"): Round {
@@ -175,9 +197,8 @@ export function judgeRound(
     winningOptionId: option.id, responseTexts: option.cardIds.map(id => catalog.cards.get(id)!.text),
     scores: [...room.players.values()].map(p => ({ playerId: p.id, nickname: p.nickname, score: p.score })),
   };
-  const prompt = catalog.cards.get(round.promptCardId)!;
   room.game.history.push({ roundNumber: round.number,
-    prompt: { id: prompt.id, text: prompt.text, pick: round.pick, draw: round.draw }, result: structuredClone(round.result) });
+    prompt: { id: round.promptCardId, text: round.promptText, pick: round.pick, draw: round.draw }, result: structuredClone(round.result) });
   if (room.game.history.length > HISTORY_LIMIT) room.game.history.shift();
   settleCards(room);
   round.deadlineAt = null;

@@ -589,6 +589,7 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
 .ranking-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--display); font-size: 1rem; font-weight: 900; }
 .final-score { white-space: nowrap; font-family: var(--display); font-size: 1.05rem; font-weight: 900; }
 .final-actions { display: grid; justify-items: center; gap: 4px; margin-top: 22px; }
+.final-action-buttons { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .final-actions .button { min-height: 54px; font-size: 1rem; }
 .final-actions .fine-print { margin: 8px 0 0; }
 .result-particles { display: none; position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }

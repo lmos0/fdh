@@ -23,7 +23,7 @@ function SubmissionProgress({ received, expected }: { received: number; expected
   </div>;
 }
 
-export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, advance, revealRoundId }: {
+export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, advance, restart, revealRoundId }: {
   snapshot: Snapshot; disabled: boolean;
   revealRoundId: string | null;
   submit: (roundId: string, cardIds: string[]) => void;
@@ -31,6 +31,7 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
   leave: () => void;
   pause: (roundId: string, paused: boolean) => void;
   advance: (roundId: string) => void;
+  restart: (toLobby?: boolean) => void;
 }) {
   const { room, self } = snapshot;
   const round = room.round;
@@ -72,6 +73,10 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
     playSound("remove");
   }
   const isJudge = round?.judgePlayerId === self.playerId;
+  const isHost = room.hostPlayerId === self.playerId;
+  const hostName = room.players.find(player => player.id === room.hostPlayerId)?.nickname ?? "o anfitrião";
+  const connectedCount = room.players.filter(player => player.connected).length;
+  const canRestartNow = room.players.length >= 3 && connectedCount === room.players.length;
   const judgeName = room.players.find(player => player.id === round?.judgePlayerId)?.nickname ?? "O juiz";
   const locked = disabled || room.paused;
   const result = round?.result;
@@ -116,8 +121,22 @@ export function GameScreen({ snapshot, disabled, submit, judge, leave, pause, ad
           <span className="ranking-position">{index + 1}º</span><PlayerAvatar nickname={player.nickname} />
           <span className="ranking-name">{player.nickname}</span><strong className="final-score">{player.score} {player.score === 1 ? "pt" : "pts"}</strong>
         </li>)}</ol>
-        <div className="final-actions"><button className="button primary" onClick={leave} disabled={disabled}>Voltar para o início</button>
-          <p className="fine-print">Para jogar novamente, volte ao início e crie outra sala.</p></div>
+        <div className="final-actions">
+          {isHost ? <>
+            <div className="final-action-buttons">
+              {room.players.length >= 3 && <button className="button primary" onClick={() => restart(false)} disabled={disabled || !canRestartNow}>Jogar novamente</button>}
+              <button className={`button ${room.players.length >= 3 ? "secondary" : "primary"}`} onClick={() => restart(true)} disabled={disabled}>Voltar à sala de espera</button>
+              <button className="button ghost" onClick={leave} disabled={disabled}>Voltar para o início</button>
+            </div>
+            <p className="fine-print">{room.players.length < 3
+              ? "Volte à sala de espera para aguardar mais participantes usando o mesmo código."
+              : !canRestartNow ? "Aguardando todos reconectarem para jogar novamente, ou volte à sala de espera."
+              : "Reinicia a partida nesta mesma sala, mantendo o código e os participantes."}</p>
+          </> : <>
+            <button className="button ghost" onClick={leave} disabled={disabled}>Voltar para o início</button>
+            <p className="fine-print">Aguardando {hostName} reiniciar a partida nesta mesma sala.</p>
+          </>}
+        </div>
       </section>}
       {round && <>
         {room.phase === "submitting" && <section className="play-section" aria-labelledby="hand-heading">

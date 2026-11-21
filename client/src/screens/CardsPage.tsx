@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CardCatalogView, CardView, PromptView } from "../../../shared/protocol";
 import { GAME_NAME } from "../../../shared/branding";
+import { formatCatalogPrompt } from "../../../shared/prompts";
 import { Brand } from "../components/Brand";
 import { logger } from "../connection/logger";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -52,8 +53,11 @@ export function CardsPage() {
   const filtered = useMemo(() => {
     const search = normalize(query.trim());
     const cards: (CardView | PromptView)[] = catalog?.[type] ?? [];
-    return cards.filter(card => (!search || normalize(`${card.id} ${card.text}`).includes(search)) &&
-      (type !== "prompts" || pick === "all" || ("pick" in card && card.pick === Number(pick))));
+    return cards.filter(card => {
+      const displayText = type === "prompts" ? formatCatalogPrompt(card.text) : card.text;
+      return (!search || normalize(`${card.id} ${card.text} ${displayText}`).includes(search)) &&
+        (type !== "prompts" || pick === "all" || ("pick" in card && card.pick === Number(pick)));
+    });
   }, [catalog, type, query, pick]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const visible = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -85,7 +89,7 @@ export function CardsPage() {
           <div className="section-heading" ref={resultsRef}><h2>{type === "prompts" ? "Perguntas / prompts" : "Cartas de resposta"}</h2><span className="muted catalog-count" role="status">{filtered.length} carta(s) encontrada(s)</span></div>
           {visible.length ? <div className="catalog-grid">{visible.map(card => <article key={card.id} className={`catalog-card ${type === "prompts" ? "catalog-prompt" : "catalog-response"}`}>
             <div className="catalog-card-meta"><span>{type === "prompts" ? "PERGUNTA" : "RESPOSTA"}</span><span>{card.id}</span></div>
-            <p>{card.text}</p>
+            <p>{type === "prompts" ? formatCatalogPrompt(card.text) : card.text}</p>
             {"pick" in card && <div className="catalog-card-meta"><span>Escolha {card.pick}</span>{card.draw > 0 && <span>+{card.draw} cartas</span>}</div>}
           </article>)}</div> : <div className="panel waiting-message">Nenhuma carta encontrada. Tente outro texto ou filtro.</div>}
           <nav className="catalog-pagination" aria-label="Paginação das cartas">

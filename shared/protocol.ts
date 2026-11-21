@@ -61,6 +61,7 @@ export interface CommandPayloads {
   "room.leave": Record<string, never>;
   "room.configure": { targetScore: number; phaseTimeLimitSeconds?: number | null; resultIntervalSeconds?: number | null };
   "game.start": Record<string, never>;
+  "game.restart": { toLobby?: boolean };
   "game.pause": { roundId: string; paused: boolean };
   "round.advance": { roundId: string };
   "round.submit": { roundId: string; cardIds: string[] };

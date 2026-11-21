@@ -5,7 +5,7 @@ import type { Logger } from "../../shared/logging";
 import { logger as defaultLogger } from "./logger";
 import { requireRule, RuleError } from "./errors";
 import {
-  advanceRound, handleDepartures, initialGame, isPaused, judgeRound, startGame,
+  advanceRound, handleDepartures, initialGame, isPaused, judgeRound, restartGame, startGame,
   submitCards, syncClocks, expirePhase, RESULT_DURATION_MS,
 } from "./game";
 import { projectSnapshot } from "./projections";
@@ -347,6 +347,12 @@ export function createRoomService(catalog: Catalog, options: {
                startGame(room, catalog, timestamp);
               logger.info("game.started", { ...context, playerCount: room.players.size,
                 targetScore: room.settings.targetScore });
+              break;
+            case "game.restart":
+              requireRule(room.hostPlayerId === player.id, "NOT_HOST");
+              restartGame(room, catalog, timestamp, command.payload.toLobby === true);
+              logger.info("game.restarted", { ...context, playerCount: room.players.size,
+                targetScore: room.settings.targetScore, phase: room.game.phase });
               break;
             case "game.pause":
               requireRule(room.game.phase !== "lobby" && room.game.phase !== "finished", "INVALID_PHASE");

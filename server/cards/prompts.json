@@ -88,5 +88,13 @@
   { "id": "p87", "text": "Eu realmente nunca entendi _____ até encontrar _____. [PICK 2]", "pick": 2 },
   { "id": "p88", "text": "Rede Vida apresenta _____, a estória de _____. [PICK 2]", "pick": 2 },
   { "id": "p89", "text": "_____ + _____ = _____. [DRAW 2, PICK 3]", "pick": 3, "draw": 2 },
-  { "id": "p90", "text": "Faça um haiku. [DRAW 2, PICK 3]", "pick": 3, "draw": 2 }
+  { "id": "p90", "text": "Faça um haiku. [DRAW 2, PICK 3]", "pick": 3, "draw": 2 },
+  { "id": "p91", "text": "O que não se deve levar para um velório?" },
+  { "id": "p92", "text": "O que pessoas negras gostam?" },
+  { "id": "p93", "text": "Qual é a pior coisa para ouvir de um médico?" },
+  { "id": "p94", "text": "_____ tirou o Brasil do mapa da fome." },
+  { "id": "p95", "text": "Meus pais se juntaram a uma seita que adora _____." },
+  { "id": "p96", "text": "O maior milagre de Jesus foi _____." },
+  { "id": "p97", "text": "Ninguém esperava que {player} fosse parar no Jornal Nacional por _____." },
+  { "id": "p98", "text": "O que está escrito na Bíblia, mas ninguém teve coragem de traduzir: _____." }
 ]

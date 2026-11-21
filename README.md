@@ -162,7 +162,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 - **Pausa coletiva:** qualquer participante pode pausar ou retomar para todos, inclusive no resultado. Ela congela o tempo restante, não reinicia o prazo. A pausa por desconexão é independente: limpar uma não remove a outra. Sair/expirar a sessão ainda segue as regras normais de cancelamento/encerramento.
 - O servidor controla todos os prazos e verifica a expiração antes de executar comandos, inclusive entre ciclos da manutenção (a cada segundo). Uma ação recebida no instante do vencimento já é atrasada. O relógio do navegador é apenas uma indicação baseada no tempo informado pelo servidor; não concede prorrogação nem pontos.
 - O **histórico** mostra as últimas 30 combinações vencedoras, da mais recente para a mais antiga, com pergunta, ordem das cartas e autor. Só entra depois do julgamento aceito; não revela autoria das opções em disputa nem guarda rodadas canceladas. Continua disponível ao reconectar e no fim da partida, apenas enquanto a sala existir em memória.
-- Para revanche, saia e crie uma nova sala.
+- Ao fim da partida, o anfitrião pode **jogar novamente** na mesma sala (zerando pontos, mãos e histórico com o mesmo código e participantes) ou **voltar à sala de espera** para reconfigurar a partida e receber novos jogadores.
 
 ### Escolher e editar no celular
 
@@ -181,7 +181,7 @@ Para testar: instale os navegadores com `bunx playwright install chromium webkit
 - Enquanto as respostas chegam, juiz e quem já enviou veem **uma carta virada por resposta esperada**, sem revelar quem enviou. No julgamento, a pergunta é preenchida com a combinação que o juiz tocou, e cada pessoa reconhece a própria combinação pelo marcador **Sua resposta**, visível só para ela. A barra de escolha do juiz acompanha a tela depois que uma combinação é tocada.
 - O cabeçalho fica compacto durante a partida: marca curta, sala e conexão, áudio e menu. Catálogo, convite, tema e saída ficam no menu secundário, que fecha com Escape, toque fora ou escolha de ação. No lobby, o código da sala e o botão de convite ficam em destaque no próprio painel da sala de espera.
 - A revelação preenche a pergunta com a combinação vencedora em dourado, destaca as cartas, mostra autor com avatar de iniciais e marca “+1” perto do placar. O histórico guarda cada pergunta já preenchida. Movimentos curtos e oito partículas decorativas de cartas/estrelas não escondem o texto nem atrasam a leitura. Respeitam `prefers-reduced-motion`; snapshots repetidos, reconexões e resultados recebidos em aba oculta não repetem a celebração. A próxima rodada continua sob controle do servidor.
-- A vitória final abre com o campeão em destaque, seguido da classificação final e da última combinação vencedora. Ainda não existe revanche na mesma sala: a ação principal volta ao início para criar outra partida.
+- A vitória final abre com o campeão em destaque, seguido da classificação final e da última combinação vencedora. O anfitrião pode iniciar outra partida imediatamente na mesma sala ou voltar à sala de espera mantendo o código.
 - As carinhas têm funções: curiosa no lobby, pensativa na escolha, desconfiada com martelo no julgamento, travessa no resultado e sonolenta na reconexão. São SVGs locais decorativos, sempre acompanhados por texto que explica o estado.
 - A paleta rosa continua nas ações e seleções. Vitória usa dourado suave próprio, com selos/estrelas/rabiscos discretos. Títulos e cartas usam a mesma pilha arredondada de fontes do sistema; as cartas mantêm o conteúdo integral. Entrada, seleção e pontuação usam movimentos curtos no mesmo fluxo dos sons, sem dependências adicionais.
 
@@ -209,8 +209,11 @@ Um heartbeat a cada 30 segundos detecta conexões sem resposta em até 60 segund
 - `client/src/audio/`: preferências, detecção de mudanças de estado e sintetizador Web Audio.
 - `client/src/screens/`: entrada, lobby, partida e catálogo.
 - `client/src/components/`: cartas e participantes.
-- `shared/protocol.ts`: contrato público, sem estado privado do servidor.
+- `client/src/table/`: mesa 3D em Three.js, texturas procedurais, câmera/zoom e mapeamento do snapshot.
+- `shared/protocol.ts`: contrato público e constantes compartilhadas de regras, sem estado privado do servidor.
+- `shared/prompts.ts`: substituição de `{player}` e formatação de perguntas no catálogo.
 - `server/src/connections.ts`: transporte Bun, origem, heartbeat, rate limit e backpressure.
+- `server/src/guards.ts`: type guards reutilizados na validação de rede e catálogo.
 - `server/src/protocol.ts`: validação em runtime; tipos TypeScript não substituem validação.
 - `server/src/rooms.ts`: salas, sessões, conexões lógicas, deduplicação e expiração.
 - `server/src/game.ts`: fases, respostas, julgamento, pontuação e rodízio.
@@ -227,7 +230,7 @@ Durante envio, somente a contagem global é pública. No julgamento, opções t�
 
 ### Cartas
 
-Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem informar `pick` (1–3, padrão 1) e `draw` (0–2, padrão 0). Os marcadores no texto são visuais; as regras usam esses campos, não contam lacunas. IDs devem ser únicos entre ambos os arquivos. O catálogo atual tem 90 perguntas e 459 respostas.
+Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem informar `pick` (1–3, padrão 1) e `draw` (0–2, padrão 0). Os marcadores no texto são visuais; as regras usam esses campos, não contam lacunas. IDs devem ser únicos entre ambos os arquivos. O catálogo atual tem 98 perguntas e 470 respostas.
 
 O catálogo é validado antes de o servidor iniciar: precisa de pelo menos uma pergunta e `8 × 7 + 7 × maior draw` respostas. Com compra de duas cartas extras, o mínimo é 70, garantindo cartas suficientes para oito jogadores.
 
@@ -253,6 +256,7 @@ Comandos JSON possuem `type`, `requestId` e `payload`. O servidor responde `comm
 | `game.pause` | `roundId`, `paused` | Qualquer participante, em rodada ativa ou resultado. Estado desejado explícito, não toggle. |
 | `round.advance` | `roundId` | Só anfitrião durante resultado não pausado; pode antecipar o intervalo automático. |
 | `game.start` | Objeto vazio | Anfitrião, 3–8 pessoas conectadas. |
+| `game.restart` | `toLobby?` (booleano opcional) | Anfitrião, após o fim da partida. Com `toLobby: true` volta ao lobby; caso contrário reinicia na mesma sala com 3–8 pessoas conectadas. |
 | `round.submit` | `roundId`, `cardIds` em ordem | Não juiz, envio, quantidade exata, cartas próprias distintas, sem resposta prévia. |
 | `round.judge` | `roundId`, `optionId` | Juiz, julgamento, opção atual. |
 | `connection.pong` | `nonce` | Heartbeat pendente da conexão. |

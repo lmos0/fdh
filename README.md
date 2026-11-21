@@ -230,7 +230,7 @@ Durante envio, somente a contagem global é pública. No julgamento, opções t�
 
 ### Cartas
 
-Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem informar `pick` (1–3, padrão 1) e `draw` (0–2, padrão 0). Os marcadores no texto são visuais; as regras usam esses campos, não contam lacunas. IDs devem ser únicos entre ambos os arquivos. O catálogo atual tem 98 perguntas e 470 respostas.
+Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem informar `pick` (1–3, padrão 1) e `draw` (0–2, padrão 0). Os marcadores no texto são visuais; as regras usam esses campos, não contam lacunas. IDs devem ser únicos entre ambos os arquivos. O catálogo atual tem 121 perguntas e 662 respostas.
 
 O catálogo é validado antes de o servidor iniciar: precisa de pelo menos uma pergunta e `8 × 7 + 7 × maior draw` respostas. Com compra de duas cartas extras, o mínimo é 70, garantindo cartas suficientes para oito jogadores.
 

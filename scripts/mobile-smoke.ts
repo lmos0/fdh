@@ -9,7 +9,9 @@ import { startServer } from "../server/src/connections";
 const catalog = await loadCatalog();
 const logger = createLogger({ level: "silent" });
 // Rótulos e contagens derivados do catálogo real, para não quebrar quando cartas são adicionadas.
+const CATALOG_PAGE_SIZE = 24;
 const responsesTab = `Respostas (${catalog.responseIds.length})`;
+const responsePages = Math.ceil(catalog.responseIds.length / CATALOG_PAGE_SIZE);
 const promptsTab = `Perguntas / prompts (${catalog.promptIds.length})`;
 const triplePromptCount = catalog.promptIds.filter(id => {
   const card = catalog.cards.get(id);
@@ -154,7 +156,7 @@ async function layoutMatrix(browser: Browser, deviceName: string) {
     await audit(page, `${deviceName} / carta longa`);
     await search.fill("");
     await page.getByRole("button", { name: "Próxima", exact: false }).tap();
-    await page.getByText("Página 2 de 20", { exact: true }).waitFor();
+    await page.getByText(`Página 2 de ${responsePages}`, { exact: true }).waitFor();
     const firstCard = await page.locator(".catalog-card").first().boundingBox();
     assert(firstCard && firstCard.y < 200, "Paginação não voltou ao início das cartas");
     await audit(page, `${deviceName} / paginação`);

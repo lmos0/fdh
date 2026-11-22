@@ -23,14 +23,36 @@ const gameApp = startServer({ catalog: { ...catalog, promptIds: ["p17", "p77", "
 const origin = `http://127.0.0.1:${app.server.port}`;
 const gameOrigin = `http://127.0.0.1:${gameApp.server.port}`;
 const pageErrors: string[] = [];
+const AUDIT_ANIMATION_WAIT_MS = 1_000;
 let audits = 0;
 
-function observe(page: Page) {
+// Sem GPU (Linux da CI), o WebGL do WebKit também roda em software e congela a página por segundos.
+const SOFTWARE_WEBGL = process.platform !== "darwin";
+
+async function observe(page: Page) {
   page.setDefaultTimeout(10_000);
   page.on("pageerror", error => pageErrors.push(error.name));
+  if (!SOFTWARE_WEBGL) return;
+  // Sem contexto WebGL o three.js não cria o renderizador e a mesa cai na vista clássica.
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+      value(this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+        return type.includes("webgl") ? null : Reflect.apply(getContext, this, [type, ...rest]);
+      },
+    });
+  });
 }
 
 async function audit(page: Page, label: string) {
+  // Medir no meio de uma animação de entrada (ex.: scale(.85) na revelação) dá tamanhos transitórios.
+  // A espera tem teto porque páginas em segundo plano podem não avançar animações no headless.
+  await page.evaluate(limit => Promise.race([
+    Promise.all(document.getAnimations()
+      .filter(animation => animation.playState === "running" && animation.effect?.getComputedTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => undefined))),
+    new Promise(resolve => setTimeout(resolve, limit)),
+  ]), AUDIT_ANIMATION_WAIT_MS);
   const result = await page.evaluate(() => {
     const visible = (element: Element) => element.getClientRects().length > 0;
     const describe = (element: Element) => `${element.tagName.toLowerCase()}#${element.id}.${element.className}`;
@@ -112,7 +134,7 @@ function contextOptions(deviceName: string, viewport: { width: number; height: n
 async function layoutMatrix(browser: Browser, deviceName: string) {
   const context = await browser.newContext(contextOptions(deviceName, { width: 360, height: 640 }));
   const page = await context.newPage();
-  observe(page);
+  await observe(page);
   const sizes = [
     { width: 320, height: 568 }, { width: 360, height: 640 }, { width: 375, height: 667 },
     { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 768, height: 1024 },
@@ -188,7 +210,7 @@ async function gameByTouch(browser: Browser, deviceName: string) {
   const names = ["AnfitriaoComNomeBemLongo01", "SegundoJogadorNomeLongo12", "TerceiroJogadorNomeLongo12"].map(name => name.slice(0, 24));
   assert(new Set(names).size === 3, "Apelidos de teste precisam ser distintos");
   try {
-    for (const page of pages) observe(page);
+    for (const page of pages) await observe(page);
     await pages[0]!.goto(gameOrigin);
     await pages[0]!.getByText("Conectado", { exact: true }).waitFor();
     await pages[0]!.getByLabel("Seu apelido").tap();
@@ -421,7 +443,7 @@ async function gameByTouch(browser: Browser, deviceName: string) {
 async function soloByTouch(browser: Browser, deviceName: string) {
   const context = await browser.newContext(contextOptions(deviceName, { width: 390, height: 844 }));
   const page = await context.newPage();
-  observe(page);
+  await observe(page);
   try {
     await page.goto(gameOrigin);
     await page.getByText("Conectado", { exact: true }).waitFor();
@@ -504,7 +526,7 @@ async function soloByTouch(browser: Browser, deviceName: string) {
 async function featureFlagByTouch(browser: Browser, deviceName: string) {
   const context = await browser.newContext(contextOptions(deviceName, { width: 320, height: 568 }));
   const page = await context.newPage();
-  observe(page);
+  await observe(page);
   // Segurar a configuração demonstra que não há flash do botão antes da resposta do servidor.
   let releaseConfig: (() => void) | null = null;
   await page.routeWebSocket("**/ws", socket => {
@@ -542,7 +564,7 @@ async function featureFlagByTouch(browser: Browser, deviceName: string) {
 async function clocksByTouch(browser: Browser, deviceName: string) {
   const context = await browser.newContext(contextOptions(deviceName, { width: 320, height: 568 }));
   const page = await context.newPage();
-  observe(page);
+  await observe(page);
   // Relógio local muito adiantado não deve encerrar o cronômetro autoritativo.
   await page.addInitScript(() => { const realNow = Date.now; Date.now = () => realNow() + 86_400_000; });
   try {
@@ -583,7 +605,8 @@ async function clocksByTouch(browser: Browser, deviceName: string) {
 try {
   // Chromium headless only has SwiftShader (software GL, no parallel shader compile): each 3D table stalls
   // its page for seconds and three players exceed the UI timeouts. The 3D table in Chromium is covered by
-  // test:3d; here Chromium exercises the classic fallback view and WebKit keeps the WebGL table.
+  // test:3d; here Chromium exercises the classic fallback view and WebKit keeps the WebGL table on macOS
+  // (GPU). Elsewhere WebKit has the same problem and also uses the classic view (see SOFTWARE_WEBGL).
   for (const profile of [
     { engine: chromium, device: "Pixel 7", args: ["--disable-3d-apis"] },
     { engine: webkit, device: "iPhone 13 Mini", args: [] },

@@ -3,6 +3,7 @@ import { chromium, webkit, devices, type Browser, type Locator, type Page } from
 import { createLogger } from "../shared/logging";
 import { loadCatalog } from "../server/src/cards";
 import { startServer } from "../server/src/connections";
+import { disableSoftwareWebGL } from "./webgl";
 
 // Execução opcional, separada dos testes de regras e do build de produção.
 // Navegadores: bunx playwright install chromium webkit
@@ -26,22 +27,10 @@ const pageErrors: string[] = [];
 const AUDIT_ANIMATION_WAIT_MS = 1_000;
 let audits = 0;
 
-// Sem GPU (Linux da CI), o WebGL do WebKit também roda em software e congela a página por segundos.
-const SOFTWARE_WEBGL = process.platform !== "darwin";
-
 async function observe(page: Page) {
   page.setDefaultTimeout(10_000);
   page.on("pageerror", error => pageErrors.push(error.name));
-  if (!SOFTWARE_WEBGL) return;
-  // Sem contexto WebGL o three.js não cria o renderizador e a mesa cai na vista clássica.
-  await page.addInitScript(() => {
-    const getContext = HTMLCanvasElement.prototype.getContext;
-    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
-      value(this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
-        return type.includes("webgl") ? null : Reflect.apply(getContext, this, [type, ...rest]);
-      },
-    });
-  });
+  await disableSoftwareWebGL(page);
 }
 
 async function audit(page: Page, label: string) {

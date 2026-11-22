@@ -3,6 +3,8 @@ import { chromium, webkit, type Browser, type Page } from "playwright";
 import { loadCatalog } from "../server/src/cards";
 import { startServer } from "../server/src/connections";
 import { createLogger } from "../shared/logging";
+import { soundRecipe } from "../client/src/audio/recipes";
+import { disableSoftwareWebGL } from "./webgl";
 
 // Instrumentação somente no teste: conta nós Web Audio reais e observa logs sem payloads.
 interface AudioProbe { contexts: number; starts: number; noiseStarts: number; filters: number; failedStarts: number; failPlayback: boolean; states: string[] }
@@ -12,6 +14,19 @@ const app = startServer({ catalog: { ...catalog, promptIds: ["p89"] }, port: 0, 
   logger: createLogger({ level: "silent" }), botTestModeEnabled: true });
 const origin = `http://127.0.0.1:${app.server.port}`;
 const pageErrors: string[] = [];
+const VICTORY_DURATION_MS = Math.max(...soundRecipe("victory").map(tone => tone.at + tone.duration)) * 1_000;
+const SOUND_LOG_TIMEOUT_MS = 5_000;
+const SOUND_LOG_POLL_MS = 20;
+
+async function waitForSound(sounds: readonly string[], from: number, names: readonly string[]): Promise<string> {
+  const deadline = Date.now() + SOUND_LOG_TIMEOUT_MS;
+  for (;;) {
+    const found = sounds.slice(from).find(sound => names.includes(sound));
+    if (found) return found;
+    assert(Date.now() < deadline, `Som não registrado: ${names.join(" ou ")}`);
+    await new Promise(resolve => setTimeout(resolve, SOUND_LOG_POLL_MS));
+  }
+}
 
 async function probe(page: Page) {
   return page.evaluate(() => ({ ...(window as ProbedWindow).__audioProbe! }));
@@ -20,6 +35,7 @@ async function probe(page: Page) {
 async function setup(page: Page) {
   page.setDefaultTimeout(12_000);
   page.on("pageerror", error => pageErrors.push(error.name));
+  await disableSoftwareWebGL(page);
   await page.addInitScript(() => {
     try { localStorage.setItem("fdh.logLevel", "debug"); } catch { /* Teste sem armazenamento. */ }
     const stats: AudioProbe = { contexts: 0, starts: 0, noiseStarts: 0, filters: 0, failedStarts: 0, failPlayback: false, states: [] };
@@ -266,6 +282,7 @@ async function rewardFlow(browser: Browser, name: string) {
     await pages[0]!.getByRole("button", { name: "Salvar", exact: true }).tap();
     await pages[0]!.getByRole("button", { name: "Começar a partida", exact: true }).tap();
     let ended = false;
+    let previewFrom: number | null = null;
     for (let round = 0; round < 5; round++) {
       for (const page of pages) await page.getByRole("heading", { name: "Respostas", exact: true }).waitFor();
       const judgeFlags = await Promise.all(pages.map(page => page.getByRole("status", { name: "Juiz da rodada", exact: true }).textContent().then(text => text!.includes("Você é o juiz"))));
@@ -286,8 +303,15 @@ async function rewardFlow(browser: Browser, name: string) {
           await options.nth(index).tap(); break;
         }
       }
+      // A vinheta de vitória dura pouco mais de um segundo: o popover já fica aberto para a tecla sair
+      // enquanto ela toca, sem depender da velocidade da máquina.
+      if (winnerIndex === 0) await openSound(pages[0]!);
       const before = played.map(events => events.length);
       await judge.getByRole("button", { name: "Escolher vencedora", exact: true }).tap();
+      if (winnerIndex === 0 && await waitForSound(played[0]!, before[0]!, ["point", "victory"]) === "victory") {
+        previewFrom = played[0]!.length;
+        await pages[0]!.getByLabel("Volume", { exact: false }).press("ArrowRight");
+      }
       for (const page of pages) await page.locator(".round-result").waitFor();
       ended = await pages[0]!.locator(".game-heading h1").textContent() === "Fim de jogo";
       for (const [index, events] of played.entries()) {
@@ -300,10 +324,13 @@ async function rewardFlow(browser: Browser, name: string) {
     }
     assert(ended, "Partida sonora não terminou");
     assert(played[0]!.filter(sound => sound === "victory").length === 1, "Campeão não recebeu vinheta própria única");
-    const beforePreview = played[0]!.length;
-    await openSound(pages[0]!);
+    assert(previewFrom !== null, "Campeão não testou a prévia durante a vinheta");
+    // Depois da vinheta a prévia toca; os logs chegam em ordem, então um único "select" prova que a
+    // tecla apertada durante a vitória foi silenciada (e não apenas registrada com atraso).
+    await pages[0]!.waitForTimeout(VICTORY_DURATION_MS);
     await pages[0]!.getByLabel("Volume", { exact: false }).press("ArrowRight");
-    assert(!played[0]!.slice(beforePreview).includes("select"), "Prévia de interface sobrepôs a vinheta prioritária de vitória");
+    await waitForSound(played[0]!, previewFrom, ["select"]);
+    assert(played[0]!.slice(previewFrom).filter(sound => sound === "select").length === 1, "Prévia de interface sobrepôs a vinheta prioritária de vitória");
     console.info(`${name}: resultado comum, assinatura de ponto, martelo confirmado, vinheta do campeão e encerramento dos demais OK em partida real.`);
   } finally { await Promise.all(contexts.map(context => context.close())); }
 }

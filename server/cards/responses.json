@@ -15,7 +15,6 @@
   { "id": "r14", "text": "Um tiroteio." },
   { "id": "r15", "text": "Um paradoxo de viagem no tempo." },
   { "id": "r16", "text": "Uma autêntica comida mexicana." },
-  { "id": "r17", "text": "Bijuterias." },
   { "id": "r18", "text": "Consultores." },
   { "id": "r19", "text": "Dívidas astronômicas." },
   { "id": "r20", "text": "Problemas com o papai." },
@@ -214,13 +213,12 @@
   { "id": "r213", "text": "Rezar até deixar de ser gay." },
   { "id": "r214", "text": "Se curtir." },
   { "id": "r215", "text": "Dois anões cagando em um balde." },
-  { "id": "r216", "text": "A KKK." },
+  { "id": "r216", "text": "A Ku Klux Klan." },
   { "id": "r217", "text": "Genghis Khan." },
   { "id": "r218", "text": "Metanfetaminas." },
   { "id": "r219", "text": "Servidão." },
   { "id": "r220", "text": "Não falar com estranhos." },
   { "id": "r221", "text": "O Bop It™." },
-  { "id": "r222", "text": "A carreira de ator de Shaquille O’Neal." },
   { "id": "r223", "text": "Empinar." },
   { "id": "r224", "text": "Justiça de um vigilante." },
   { "id": "r225", "text": "Compensação." },
@@ -483,7 +481,6 @@
   { "id": "r482", "text": "Churrasco na laje." },
   { "id": "r483", "text": "Petistas." },
   { "id": "r484", "text": "Pegadinha do malandro!" },
-  { "id": "r485", "text": "Antônio Fagundes." },
   { "id": "r486", "text": "Fazer programa gay." },
   { "id": "r487", "text": "Servente de pedreiro." },
   { "id": "r488", "text": "O garoto-propaganda das Casas Bahia®." },
@@ -660,5 +657,6 @@
   { "id": "r659", "text": "Procurando o Wally." },
   { "id": "r660", "text": "O Google." },
   { "id": "r661", "text": "Usuários de Orkut." },
-  { "id": "r662", "text": "Bolsonaristas." }
+  { "id": "r662", "text": "Bolsonaristas." },
+  { "id": "r663", "text": "A Pandemia do Covid." }
 ]

@@ -12,6 +12,7 @@ import {
 } from "./game";
 import { projectSnapshot } from "./projections";
 import { addTestBots, runDueBotAction, syncBotAction } from "./bots";
+import { NOOP_CARD_METRICS, type CardMetricsRecorder } from "./cardMetrics";
 import type { CachedRequest, Catalog, Effects, GameNotice, GameRoom, Player, Session } from "./types";
 
 export const RECONNECT_GRACE_MS = RECONNECT_GRACE_SECONDS * MS_PER_SECOND;
@@ -43,10 +44,13 @@ type MemberHandler<K extends CommandType> =
   (payload: CommandPayloads[K], membership: Membership, context: CommandContext) => GameNotice[] | void;
 
 export function createRoomService(catalog: Catalog, options: {
-  now?: () => number; maxRooms?: number; logger?: Logger; botTestModeEnabled?: boolean;
+  now?: () => number; maxRooms?: number; logger?: Logger; botTestModeEnabled?: boolean; cardMetrics?: CardMetricsRecorder;
 } = {}) {
   const now = options.now ?? Date.now;
   const logger = options.logger ?? defaultLogger;
+  const cardMetrics = options.cardMetrics ?? NOOP_CARD_METRICS;
+  // Última mão observada por jogador; WeakMap para não reter jogadores removidos.
+  const observedHands = new WeakMap<Player, ReadonlySet<string>>();
   const rooms = new Map<string, GameRoom>();
   const sessions = new Map<string, Session>();
   const bindings = new Map<string, string>();
@@ -158,7 +162,19 @@ export function createRoomService(catalog: Catalog, options: {
     queueSnapshots(room, output);
   }
 
+  /** Toda mutação passa por `touch`: cartas novas na mão de humanos contam como distribuídas. */
+  function recordDealtCards(room: GameRoom): void {
+    for (const player of room.players.values()) {
+      if (player.isBot) continue;
+      const previous = observedHands.get(player);
+      const dealt = previous ? player.hand.filter(cardId => !previous.has(cardId)) : player.hand;
+      if (dealt.length) cardMetrics.recordDealt(room.mode, dealt);
+      observedHands.set(player, new Set(player.hand));
+    }
+  }
+
   function touch(room: GameRoom, timestamp: number): void {
+    recordDealtCards(room);
     room.version++;
     room.updatedAt = timestamp;
     room.emptySince = hasConnectedHuman(room) ? null : (room.emptySince ?? timestamp);
@@ -396,6 +412,8 @@ export function createRoomService(catalog: Catalog, options: {
   const restartRoomGame: MemberHandler<"game.restart"> = (payload, { room, player }, context) => {
     requireHost(room, player);
     restartGame(room, catalog, context.timestamp, payload.toLobby === true);
+    // Baralhos novos: uma carta que estava na mão antiga e voltou também foi distribuída.
+    for (const member of room.players.values()) observedHands.delete(member);
     logger.info("game.restarted", { ...context.log, playerCount: room.players.size,
       targetScore: room.settings.targetScore, phase: room.game.phase });
   };
@@ -421,6 +439,7 @@ export function createRoomService(catalog: Catalog, options: {
 
   const swapResponseCard: MemberHandler<"round.swap"> = (payload, { room, player }, context) => {
     const notices = swapCard(room, player, payload.roundId, payload.cardId, payload.cost);
+    if (!player.isBot) cardMetrics.recordSwap(room.mode, payload.cardId, payload.cost);
     logger.info("card.swapped", { ...context.log, roundId: payload.roundId, swapCost: payload.cost });
     return notices;
   };

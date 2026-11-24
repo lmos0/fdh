@@ -1,3 +1,4 @@
+import { startCardMetrics } from "./cardMetrics";
 import { loadCatalog } from "./cards";
 import { startServer } from "./connections";
 import { isIntegerInRange } from "./guards";
@@ -13,7 +14,8 @@ try {
   const catalog = await loadCatalog();
   logger.info("catalog.loaded", { promptCount: catalog.promptIds.length,
     responseCount: catalog.responseIds.length, durationMs: Math.round(performance.now() - startedAt) });
-  const app = startServer({ catalog, port,
+  const cardMetrics = startCardMetrics(process.env.DATABASE_URL);
+  const app = startServer({ catalog, port, cardMetrics: cardMetrics.recorder,
     publicOrigin: process.env.PUBLIC_ORIGIN ?? process.env.RENDER_EXTERNAL_URL });
 
   let stopping = false;
@@ -23,6 +25,7 @@ try {
     logger.info("process.signal_received", { signal });
     try {
       await app.stop();
+      await cardMetrics.stop();
       process.exit(0);
     } catch (error) {
       logger.error("server.shutdown_failed", {}, error);

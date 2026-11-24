@@ -10,6 +10,7 @@
     "test:mobile": "bun run build && bun scripts/mobile-smoke.ts",
     "test:3d": "bun run build && bun scripts/table-smoke.ts",
     "test:audio": "bun run build && bun scripts/audio-smoke.ts",
+    "metrics:cards": "bun scripts/cardMetrics.ts",
     "build": "bun run --cwd client build",
     "start": "bun server/src/index.ts"
   },

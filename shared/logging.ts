@@ -10,7 +10,7 @@ const fieldNames = [
   "reason", "errorCode", "errorName", "errorFrames", "method", "route", "status",
   "durationMs", "lifetimeMs", "closeCode", "clean", "attempt", "delayMs", "pendingCount",
   "bytes", "bufferedBytes", "strikes", "port", "promptCount", "responseCount", "signal",
-  "roomMode", "isBot", "botTestModeEnabled", "swapCost",
+  "roomMode", "isBot", "botTestModeEnabled", "swapCost", "cardCount",
 ] as const;
 
 export type LogFields = Partial<Record<typeof fieldNames[number], string | number | boolean | null>>;

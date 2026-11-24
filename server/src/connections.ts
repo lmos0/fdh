@@ -8,6 +8,7 @@ import { parseMessage } from "./protocol";
 import { createRoomService } from "./rooms";
 import type { Catalog, Effects } from "./types";
 import { readFeatureFlags } from "./config";
+import type { CardMetricsRecorder } from "./cardMetrics";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_MAX_CONNECTIONS = 200;
@@ -52,10 +53,12 @@ export function startServer(options: {
   maxConnections?: number;
   logger?: Logger;
   botTestModeEnabled?: boolean;
+  cardMetrics?: CardMetricsRecorder;
 }) {
   const logger = options.logger ?? defaultLogger;
   const features = { botTestMode: options.botTestModeEnabled ?? readFeatureFlags().botTestMode };
-  const service = createRoomService(options.catalog, { logger, botTestModeEnabled: features.botTestMode });
+  const service = createRoomService(options.catalog, { logger, botTestModeEnabled: features.botTestMode,
+    cardMetrics: options.cardMetrics });
   const sockets = new Map<string, ServerWebSocket<ConnectionData>>();
   const http = createHttpHandler(options.catalog, options.distDirectory, logger);
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;

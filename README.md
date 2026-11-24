@@ -81,6 +81,7 @@ O botão de sol/lua no cabeçalho alterna entre tema claro e escuro, no jogo e n
 | `bun run test:audio` | Build e validação de áudio em Chromium e WebKit, com nós Web Audio reais. |
 | `bun run build` | Gera `client/dist`. |
 | `bun run start` | Servidor de produção na porta 3000 ou em `PORT`. |
+| `bun run metrics:cards` | Ranking das cartas mais trocadas, lido do Postgres (veja [Métricas de cartas](#métricas-de-cartas)). |
 
 ### Validação mobile
 
@@ -203,7 +204,7 @@ Um heartbeat a cada 30 segundos detecta conexões sem resposta em até 60 segund
 - Sem participantes: sala removida imediatamente. Salas sem conexões também têm limite de cinco minutos; normalmente as sessões expiram antes disso.
 - Resultado final: sala removida após 15 minutos.
 
-**Não há persistência. Suspensão, reinício, crash ou deploy apagam todas as partidas.** A reconexão só funciona enquanto o estado continuar no mesmo processo.
+**Não há persistência de partidas. Suspensão, reinício, crash ou deploy apagam todas as partidas.** O único dado gravado fora do processo são as [métricas agregadas de cartas](#métricas-de-cartas), quando configuradas. A reconexão só funciona enquanto o estado continuar no mesmo processo.
 
 ## Estrutura e estado
 
@@ -222,6 +223,7 @@ Um heartbeat a cada 30 segundos detecta conexões sem resposta em até 60 segund
 - `server/src/bots.ts`: dois participantes automáticos por sala de teste, com agendamento pela manutenção existente e aplicação das mesmas regras.
 - `server/src/cards.ts`: catálogo, embaralhamento e reciclagem.
 - `server/src/projections.ts`: snapshots personalizados, sem serializar o estado interno.
+- `server/src/cardMetrics.ts`: contagem em memória de cartas distribuídas e trocadas, com envio em lote ao Postgres.
 - `server/src/http.ts`: arquivos estáticos, catálogo público e health check.
 - `shared/logging.ts`: logs JSON com campos permitidos, sem payloads privados.
 - `server/cards/`: arquivos fonte do catálogo, carregados pelo servidor.
@@ -237,6 +239,29 @@ Os dois JSONs contêm listas de objetos com `id` e `text`. Perguntas podem infor
 O catálogo é validado antes de o servidor iniciar: precisa de pelo menos uma pergunta e `8 × 7 + 7 × maior draw + 1` respostas. Com compra de duas cartas extras, o mínimo é 71, garantindo cartas suficientes para oito jogadores e ao menos uma no monte para a troca de carta.
 
 Cada sala mantém suas próprias pilhas de IDs; os textos são compartilhados no processo. Cartas em mãos ou rodadas ativas nunca voltam ao monte. Descartes são reembaralhados quando necessário.
+
+Mantenha os IDs estáveis: as [métricas de cartas](#métricas-de-cartas) são agregadas por ID. Ao reescrever o sentido de uma carta, use um ID novo para não misturar as estatísticas da versão antiga.
+
+### Métricas de cartas
+
+Para descobrir quais respostas os jogadores rejeitam, o servidor conta, por carta, quantas vezes ela foi **distribuída** a uma pessoa (mão inicial, reposição, extras de DRAW e a carta recebida numa troca) e quantas vezes foi **descartada por troca**, separando trocas grátis e pagas. A taxa de troca é `trocas ÷ distribuições`.
+
+- **Desligado por padrão.** Só coleta com `DATABASE_URL` (Postgres) definida; sem ela, nada é contado nem enviado. Usa o cliente `Bun.SQL` nativo, sem dependências.
+- **Sem latência no jogo.** Distribuir ou trocar só incrementa um contador em memória, sincronamente. O envio acontece em segundo plano: um UPSERT em lote a cada **5 minutos** (se houver dados) e no desligamento (SIGTERM/SIGINT, com limite de 10 s, que cobre o tempo de o banco “acordar” em planos gratuitos como o Neon). Cada envio também tem 10 s para conectar e para a gravação; lento ou fora do ar, o banco não afeta a partida.
+- **Falhas.** O lote volta para a memória e é reenviado com espera crescente (até 1 h), sem descartar dados; a memória é limitada pelo tamanho do catálogo. Um crash sem SIGTERM perde no máximo os últimos 5 minutos.
+- **Privacidade.** Grava apenas ID da carta e contadores: sem jogador, apelido, sala, rodada ou texto. Bots nunca contam.
+- **Tabelas.** Criadas automaticamente. Salas normais gravam em `card_metrics`; salas de teste com bots gravam em `card_metrics_test`, que serve só para conferir que o fluxo chega ao banco e pode ser apagada a qualquer momento.
+
+Para ver o ranking (a partir do seu computador, com a mesma URL do banco):
+
+```sh
+DATABASE_URL=postgres://… bun run metrics:cards                 # maior taxa de troca
+DATABASE_URL=postgres://… bun run metrics:cards --sort paid     # mais trocas pagas (rate, swaps, paid)
+DATABASE_URL=postgres://… bun run metrics:cards --min-dealt 50 --limit 30 --json
+DATABASE_URL=postgres://… bun run metrics:cards --test          # tabela das partidas de teste
+```
+
+Cartas com menos de 30 distribuições (`--min-dealt`) ficam fora do ranking: com poucos dados, a taxa é só ruído. IDs que não existem mais no catálogo aparecem como “fora do catálogo”.
 
 ### Página de catálogo
 
@@ -290,6 +315,7 @@ Os últimos 50 resultados de comandos são lembrados por até dois minutos por c
 - HTTP serve `/`, `/cards`, assets do build, `/health` e `/api/cards`. Fontes TypeScript, arquivos JSON brutos e configuração não são públicos; somente o catálogo editorial é exposto pela API.
 - Origem é validada no upgrade. Em produção, configure `PUBLIC_ORIGIN` ou utilize `RENDER_EXTERNAL_URL`.
 - Sem HTML arbitrário, bibliotecas externas de fontes ou serviços de terceiros no frontend.
+- Único serviço externo do backend: um Postgres opcional (`DATABASE_URL`) para as [métricas de cartas](#métricas-de-cartas), decidido explicitamente. Ele recebe só contagens agregadas por ID de carta e nunca participa do caminho de um comando.
 
 Esses limites reduzem abuso casual; não são proteção completa contra ataques distribuídos. A capacidade real deve ser medida antes de aumentar os limites.
 
@@ -309,6 +335,7 @@ Não há dependências ou serviço externo de logging. O backend escreve uma lin
 - `debug`: comandos recebidos/confirmados/repetidos, duração, contagens, heartbeat, backpressure e respostas HTTP. Health checks bem-sucedidos não geram logs.
 - No navegador, `audio.played` registra somente o nome do efeito em `debug`. Falhas do dispositivo usam `audio.unavailable`, sem mensagens brutas ou conteúdo das cartas.
 - No teste solo, `room.created` inclui `roomMode` e `bot.action_applied` registra comando, jogador técnico, rodada e versão em `debug`, sem cartas ou escolhas.
+- Métricas de cartas: `card_metrics.enabled`/`disabled` na inicialização, `card_metrics.flushed` (`cardCount`, `durationMs`) a cada envio e `card_metrics.flush_failed` (`warn`; `error` a partir da 5ª falha seguida). Nunca incluem IDs ou textos de cartas.
 - `warn`/`error`: mensagens inválidas, comandos rejeitados, rate limit, heartbeat expirado, origem recusada, arquivos do build ausentes e falhas internas.
 
 Campos como `instanceId` identificam a execução do processo; `connectionId`, `roomCode`, `playerId`, `roundId`, `version` e `requestId` ajudam a correlacionar eventos. Um reinício cria outro `instanceId`. O mesmo `requestId` conecta um comando no navegador ao processamento no servidor.
@@ -330,6 +357,7 @@ As chaves antigas de sessão e apelido no armazenamento do navegador foram prese
 7. Health check: `/health`.
 8. Defina `PUBLIC_ORIGIN=https://seu-servico.onrender.com`, sem barra final. Se não definir, o servidor usa `RENDER_EXTERNAL_URL`, fornecida pelo Render. Em domínio personalizado, configure a origem explicitamente.
 9. Deixe `ENABLE_BOT_TEST_MODE=false` (ou ausente) para não disponibilizar testes com bots; use `true` somente quando quiser habilitar esse modo.
+10. Opcional: defina `DATABASE_URL` com a URL de um Postgres para coletar as [métricas de cartas](#métricas-de-cartas). Use um provedor com plano gratuito que não expire (por exemplo, Neon ou Supabase) e confira se o Postgres Free do próprio Render tem prazo de validade antes de usá-lo.
 
 Não fixe `PORT` no Render: use o valor fornecido pela plataforma. O processo escuta em `0.0.0.0`. Frontend e socket compartilham origem, porta e certificado HTTPS; o cliente usa `wss` automaticamente. Não crie um Static Site separado, worker ou segunda instância.
 

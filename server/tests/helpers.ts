@@ -3,6 +3,7 @@ import type {
 } from "../../shared/protocol";
 import { loadCatalog } from "../src/cards";
 import { parseMessage } from "../src/protocol";
+import type { CardMetricsRecorder } from "../src/cardMetrics";
 import { createRoomService } from "../src/rooms";
 import type { Catalog, Effects } from "../src/types";
 import type { Logger } from "../../shared/logging";
@@ -17,10 +18,11 @@ export const singleCatalog: Catalog = {
 };
 
 export function table(count = 3, targetScore = 3, maxRooms = 50, testCatalog = singleCatalog, logger?: Logger,
-  mode: RoomMode = "private", phaseTimeLimitSeconds: number | null = null, resultIntervalSeconds: number | null = 15) {
+  mode: RoomMode = "private", phaseTimeLimitSeconds: number | null = null, resultIntervalSeconds: number | null = 15,
+  cardMetrics?: CardMetricsRecorder) {
   let time = 1_000;
   let sequence = 0;
-  const service = createRoomService(testCatalog, { now: () => time, maxRooms, logger, botTestModeEnabled: mode === "test" });
+  const service = createRoomService(testCatalog, { now: () => time, maxRooms, logger, botTestModeEnabled: mode === "test", cardMetrics });
   const snapshots = new Map<string, Snapshot>();
   const credentials = new Map<string, SessionCredential>();
   const events: { connectionId: string; event: ServerEvent }[] = [];

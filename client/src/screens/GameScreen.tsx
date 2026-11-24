@@ -94,7 +94,7 @@ export function GameScreen({ snapshot, disabled, submit, swap, judge, leave, pau
   const locked = disabled || room.paused;
   const canSwap = room.phase === "submitting" && !isJudge && !self.submitted;
   const swapping = swapMode && canSwap && !locked;
-  const swapCost: SwapCost = self.freeSwapAvailable ? "free" : "point";
+  const swapCost: SwapCost = self.freeSwapsRemaining > 0 ? "free" : "point";
   const selfScore = room.players.find(player => player.id === self.playerId)?.score ?? 0;
   const swapCandidate = canSwap && !room.paused ? self.hand.find(card => card.id === swapCandidateId) : undefined;
   const tableSwap: TableSwap = swapping ? "active" : canSwap && canAffordSwap(swapCost, selfScore) ? "ready" : "off";
@@ -181,9 +181,9 @@ export function GameScreen({ snapshot, disabled, submit, swap, judge, leave, pau
                 <p>Aguardando as outras respostas. Depois, {judgeName} escolhe a vencedora.</p></div>
             </> : <>
               {round.prompt.pick > 1 && <p className="muted hand-hint">Toque nas cartas na ordem da resposta. <span>Para trocar uma, toque no espaço dela na barra de envio.</span></p>}
-              <SwapToggle active={swapping} cost={swapCost} score={selfScore} disabled={locked} onToggle={() => setSwapMode(value => !value)} />
+              <SwapToggle active={swapping} cost={swapCost} score={selfScore} freeSwapsRemaining={self.freeSwapsRemaining} disabled={locked} onToggle={() => setSwapMode(value => !value)} />
               <Hand cards={self.hand} selectedIds={selection.slots} onSelect={pickCard} disabled={locked} swapping={swapping} />
-              {swapCandidate && <SwapConfirmDialog card={swapCandidate} cost={swapCost} score={selfScore} disabled={disabled}
+              {swapCandidate && <SwapConfirmDialog card={swapCandidate} cost={swapCost} score={selfScore} freeSwapsRemaining={self.freeSwapsRemaining} disabled={disabled}
                 onConfirm={confirmSwap} onCancel={() => setSwapCandidateId(null)} />}
               <SubmissionBar prompt={round.prompt} clock={<PhaseClock snapshot={snapshot} announce={false} compact />} slots={slotCards} activeIndex={selection.activeIndex}
                 activate={activateSlot} move={moveSelection} remove={removeSelection}

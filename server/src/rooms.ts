@@ -189,7 +189,7 @@ export function createRoomService(catalog: Catalog, options: {
     const token = randomBytes(SESSION_TOKEN_BYTES).toString("hex");
     const player: Player = {
       id: crypto.randomUUID(), nickname, score: 0, hand: [], joinedAt: timestamp,
-      disconnectedAt: null, sessionToken: token, isBot: false, freeSwapUsed: false,
+      disconnectedAt: null, sessionToken: token, isBot: false, freeSwapsUsed: 0,
     };
     const session: Session = {
       token, roomCode: room.code, playerId: player.id, connectionId, requests: cacheFor(connectionId),

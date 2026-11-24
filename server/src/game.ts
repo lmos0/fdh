@@ -1,5 +1,5 @@
 import { randomInt } from "node:crypto";
-import { HISTORY_LIMIT, isGameInProgress, MIN_PLAYERS, SWAP_COST_POINTS, type SwapCost } from "../../shared/protocol";
+import { FREE_SWAPS_PER_GAME, HISTORY_LIMIT, isGameInProgress, MIN_PLAYERS, SWAP_COST_POINTS, type SwapCost } from "../../shared/protocol";
 import { fillPlayerPlaceholders, hasPlayerPlaceholder } from "../../shared/prompts";
 import { draw, HAND_SIZE, makeDeck, shuffled } from "./cards";
 import { requireRule } from "./errors";
@@ -171,7 +171,7 @@ export function restartGame(room: GameRoom, catalog: Catalog, now: number, toLob
   for (const player of room.players.values()) {
     player.score = 0;
     player.hand = [];
-    player.freeSwapUsed = false;
+    player.freeSwapsUsed = 0;
   }
   room.playerOrder = room.playerOrder.filter(id => room.players.has(id));
   room.pendingBotAction = null;
@@ -208,7 +208,7 @@ export function submitCards(room: GameRoom, player: Player, roundId: string, car
 }
 
 export function swapCostFor(player: Player): SwapCost {
-  return player.freeSwapUsed ? "point" : "free";
+  return player.freeSwapsUsed < FREE_SWAPS_PER_GAME ? "free" : "point";
 }
 
 function canAffordSwap(player: Player, cost: SwapCost): boolean {
@@ -226,7 +226,7 @@ function validateSwap(round: Round, player: Player, cardId: string, cost: SwapCo
 
 function chargeSwap(player: Player, cost: SwapCost): void {
   if (cost === "free") {
-    player.freeSwapUsed = true;
+    player.freeSwapsUsed += 1;
     return;
   }
   player.score -= SWAP_COST_POINTS;

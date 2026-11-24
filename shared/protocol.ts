@@ -15,6 +15,7 @@ export const NICKNAME_LENGTH = { min: 2, max: 24 } as const;
 export const PICK_RANGE = { min: 1, max: 3 } as const;
 export const DRAW_RANGE = { min: 0, max: 2 } as const;
 export const SWAP_COST_POINTS = 1;
+export const FREE_SWAPS_PER_GAME = 3;
 export const SWAP_COSTS = ["free", "point"] as const;
 export type SwapCost = typeof SWAP_COSTS[number];
 
@@ -69,7 +70,7 @@ export interface PlayerPrivateState {
   hand: CardView[];
   submitted: boolean;
   submittedResponses: CardView[];
-  freeSwapAvailable: boolean;
+  freeSwapsRemaining: number;
 }
 export interface Snapshot { room: RoomPublicState; self: PlayerPrivateState; serverNow: number }
 

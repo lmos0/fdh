@@ -14,7 +14,7 @@ export interface Player {
   disconnectedAt: number | null;
   sessionToken: string | null;
   isBot: boolean;
-  freeSwapUsed: boolean;
+  freeSwapsUsed: number;
 }
 export interface Submission { playerId: string; cardIds: string[] }
 export interface JudgingOption extends Submission { id: string }

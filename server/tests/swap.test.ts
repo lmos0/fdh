@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createLogger } from "../../shared/logging";
-import { DRAW_RANGE, HAND_SIZE, MAX_PLAYERS, SWAP_COST_POINTS, type SwapCost } from "../../shared/protocol";
+import { DRAW_RANGE, FREE_SWAPS_PER_GAME, HAND_SIZE, MAX_PLAYERS, SWAP_COST_POINTS, type SwapCost } from "../../shared/protocol";
 import { createCatalog } from "../src/cards";
 import { RESULT_DURATION_MS } from "../src/game";
 import { catalog, errorCode, table } from "./helpers";
@@ -24,6 +24,14 @@ function handIds(h: Harness, connection: string): string[] {
 
 function swap(h: Harness, connection: string, cost: SwapCost, cardId = handIds(h, connection)[0]!) {
   return h.command(connection, "round.swap", { roundId: h.view(connection).room.round!.id, cardId, cost });
+}
+
+function freeSwapsOf(h: Harness, connection: string): number {
+  return h.view(connection).self.freeSwapsRemaining;
+}
+
+function useAllFreeSwaps(h: Harness, connection: string): void {
+  while (freeSwapsOf(h, connection) > 0) expect(errorCode(swap(h, connection, "free"))).toBeUndefined();
 }
 
 function playRound(h: Harness): void {
@@ -64,25 +72,39 @@ describe("troca de carta da mão", () => {
     expect(after).not.toContain(discarded);
     expect(after.filter((id, index) => id !== before[index])).toEqual([after[2]!]);
     expect(scoreOf(h, player)).toBe(0);
-    expect(h.view(player).self.freeSwapAvailable).toBe(false);
+    expect(freeSwapsOf(h, player)).toBe(FREE_SWAPS_PER_GAME - 1);
     expect(swapEvents(h, eventsBefore)).toEqual([]);
     const otherView = JSON.stringify(h.view(other));
     expect(otherView).not.toContain(`"${after[2]!}"`);
     expect(otherView).not.toContain(`"${discarded}"`);
     expect(JSON.stringify(h.view(other).room)).not.toContain("freeSwap");
-    expect(h.view(other).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, other)).toBe(FREE_SWAPS_PER_GAME);
   });
 
-  test("a troca gratuita vale uma vez por partida, não por rodada", () => {
+  test("cada troca gratuita reduz o saldo da partida até acabar", () => {
     const h = table(3, 10);
     h.command("c0", "game.start", {});
     const player = respondents(h)[0]!;
-    swap(h, player, "free");
+
+    for (let used = 1; used <= FREE_SWAPS_PER_GAME; used++) {
+      expect(errorCode(swap(h, player, "free"))).toBeUndefined();
+      expect(freeSwapsOf(h, player)).toBe(FREE_SWAPS_PER_GAME - used);
+    }
+
+    expect(errorCode(swap(h, player, "free"))).toBe("SWAP_COST_CHANGED");
+    expect(scoreOf(h, player)).toBe(0);
+  });
+
+  test("as trocas gratuitas valem por partida, não por rodada", () => {
+    const h = table(3, 10);
+    h.command("c0", "game.start", {});
+    const player = respondents(h)[0]!;
+    useAllFreeSwaps(h, player);
     playRound(h);
     playUntil(h, () => respondents(h).includes(player));
 
     expect(errorCode(swap(h, player, "free"))).toBe("SWAP_COST_CHANGED");
-    expect(h.view(player).self.freeSwapAvailable).toBe(false);
+    expect(freeSwapsOf(h, player)).toBe(0);
   });
 
   test("troca paga desconta um ponto e avisa todos sem revelar as cartas", () => {
@@ -92,7 +114,7 @@ describe("troca de carta da mão", () => {
     h.command("c0", "game.start", {});
     playUntil(h, () => respondentWithPoint(h) !== undefined);
     const player = respondentWithPoint(h)!;
-    if (h.view(player).self.freeSwapAvailable) swap(h, player, "free");
+    useAllFreeSwaps(h, player);
     const scoreBefore = scoreOf(h, player);
     const discarded = handIds(h, player)[0]!;
     const eventsBefore = h.events.length;
@@ -122,7 +144,7 @@ describe("troca de carta da mão", () => {
     const h = table(3, 10);
     h.command("c0", "game.start", {});
     const player = respondents(h)[0]!;
-    swap(h, player, "free");
+    useAllFreeSwaps(h, player);
     const before = handIds(h, player);
 
     expect(errorCode(swap(h, player, "point"))).toBe("NOT_ENOUGH_POINTS");
@@ -138,7 +160,7 @@ describe("troca de carta da mão", () => {
 
     expect(errorCode(swap(h, player, "point"))).toBe("SWAP_COST_CHANGED");
     expect(handIds(h, player)).toEqual(before);
-    expect(h.view(player).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, player)).toBe(FREE_SWAPS_PER_GAME);
   });
 
   test("juiz não troca carta", () => {
@@ -149,7 +171,7 @@ describe("troca de carta da mão", () => {
 
     expect(errorCode(swap(h, judge, "free"))).toBe("JUDGE_CANNOT_SWAP");
     expect(handIds(h, judge)).toEqual(before);
-    expect(h.view(judge).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, judge)).toBe(FREE_SWAPS_PER_GAME);
   });
 
   test("não troca depois de enviar a resposta", () => {
@@ -160,7 +182,7 @@ describe("troca de carta da mão", () => {
     h.command(player!, "round.submit", { roundId, cardIds: [handIds(h, player!)[0]!] });
 
     expect(errorCode(swap(h, player!, "free"))).toBe("ALREADY_SUBMITTED");
-    expect(h.view(player!).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, player!)).toBe(FREE_SWAPS_PER_GAME);
   });
 
   test("não troca carta que não está na própria mão", () => {
@@ -169,7 +191,7 @@ describe("troca de carta da mão", () => {
     const [player, other] = respondents(h);
 
     expect(errorCode(swap(h, player!, "free", handIds(h, other!)[0]!))).toBe("CARD_NOT_IN_HAND");
-    expect(h.view(player!).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, player!)).toBe(FREE_SWAPS_PER_GAME);
   });
 
   test("não troca fora da fase de respostas", () => {
@@ -197,19 +219,19 @@ describe("troca de carta da mão", () => {
     h.command("c0", "game.pause", { roundId: h.view().room.round!.id, paused: true });
 
     expect(errorCode(swap(h, player, "free"))).toBe("GAME_PAUSED");
-    expect(h.view(player).self.freeSwapAvailable).toBe(true);
+    expect(freeSwapsOf(h, player)).toBe(FREE_SWAPS_PER_GAME);
   });
 
-  test("reiniciar a partida devolve a troca gratuita", () => {
+  test("reiniciar a partida devolve as trocas gratuitas", () => {
     const h = table(3, 3);
     h.command("c0", "game.start", {});
     const player = respondents(h)[0]!;
-    swap(h, player, "free");
+    useAllFreeSwaps(h, player);
     playUntil(h, () => h.view().room.phase === "finished");
 
     h.command("c0", "game.restart", {});
 
-    for (const connection of h.connections) expect(h.view(connection).self.freeSwapAvailable).toBe(true);
+    for (const connection of h.connections) expect(freeSwapsOf(h, connection)).toBe(FREE_SWAPS_PER_GAME);
   });
 
   test("compra carta mesmo com o catálogo mínimo e todas as mãos cheias", () => {

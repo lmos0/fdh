@@ -1,4 +1,4 @@
-import type { CardView, Snapshot } from "../../shared/protocol";
+import { FREE_SWAPS_PER_GAME, type CardView, type Snapshot } from "../../shared/protocol";
 import { isPaused } from "./game";
 import type { Catalog, GameRoom } from "./types";
 
@@ -35,7 +35,7 @@ export function projectSnapshot(room: GameRoom, playerId: string, catalog: Catal
     self: {
       playerId, hand: player.hand.map(cardView), submitted: !!submission,
       submittedResponses: submission ? submission.cardIds.map(cardView) : [],
-      freeSwapAvailable: !player.freeSwapUsed,
+      freeSwapsRemaining: FREE_SWAPS_PER_GAME - player.freeSwapsUsed,
     },
   };
 }

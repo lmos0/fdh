@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { chromium, webkit, devices, type Browser, type Locator, type Page } from "playwright";
 import { createLogger } from "../shared/logging";
+import { FREE_SWAPS_PER_GAME } from "../shared/protocol";
 import { loadCatalog } from "../server/src/cards";
 import { startServer } from "../server/src/connections";
 import { disableSoftwareWebGL } from "./webgl";
@@ -96,12 +97,12 @@ async function swapFreeCard(page: Page, label: string, handSize: number) {
   await page.getByRole("button", { name: "Trocar carta", exact: true }).tap();
   await page.locator(".answer-card").nth(1).tap();
   const dialog = page.getByRole("dialog", { name: "Trocar esta carta?" });
-  await dialog.getByText(/única troca gratuita da partida/).waitFor();
+  await dialog.getByText(/troca gratuita da partida/).waitFor();
   await audit(page, `${label} / confirmação da troca gratuita`);
   await dialog.getByRole("button", { name: "Usar troca grátis", exact: true }).tap();
   await dialog.waitFor({ state: "detached" });
-  // Sem pontos na primeira rodada: a legenda só muda depois do snapshot com a troca aplicada.
-  await page.getByText("Sem pontos para trocar", { exact: true }).waitFor();
+  // A legenda só muda depois do snapshot com a troca aplicada.
+  await page.getByText(new RegExp(`^${FREE_SWAPS_PER_GAME - 1} trocas? grátis restantes?$`)).waitFor();
   assert(await page.locator(".answer-card").count() === handSize, "Troca alterou a quantidade de cartas");
   assert((await card.textContent()) !== before, "Troca não substituiu a carta");
 }

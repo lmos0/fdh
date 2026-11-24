@@ -3,6 +3,7 @@ import { chromium, type Page } from "playwright";
 import { loadCatalog } from "../server/src/cards";
 import { startServer } from "../server/src/connections";
 import { createLogger } from "../shared/logging";
+import { FREE_SWAPS_PER_GAME } from "../shared/protocol";
 
 // Real pointer picking against a real canvas. No internal scene handles exposed to tests.
 async function pickFromTable(page: Page) {
@@ -103,7 +104,7 @@ try {
     await pickFromTable(page);
     const dialog = page.getByRole("dialog", { name: "Trocar esta carta?" });
     await dialog.getByRole("button", { name: "Usar troca grátis", exact: true }).click();
-    await page.getByText("Sem pontos para trocar", { exact: true }).waitFor();
+    await page.getByText(new RegExp(`^${FREE_SWAPS_PER_GAME - 1} trocas? grátis restantes?$`)).waitFor();
     const handAfter = await page.locator(".hand-grid .answer-card > span").allTextContents();
     assert.equal(handAfter.length, handBefore.length);
     assert.equal(handAfter.filter((text, index) => text !== handBefore[index]).length, 1);

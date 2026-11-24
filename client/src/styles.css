@@ -439,9 +439,14 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
 .game-main .section-heading h2 { font-size: 1.35rem; text-transform: uppercase; letter-spacing: .03em; }
 .hand-hint { margin: -6px 0 14px; font-size: .85rem; font-weight: 600; }
 .swap-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 14px; }
-.swap-toggle { min-height: 44px; }
+.swap-row.is-free { margin-bottom: 16px; padding: 10px 12px; border: 2px dashed var(--accent); border-radius: 16px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.swap-intro { flex-basis: 100%; margin: 0; color: var(--text); font-size: .9rem; font-weight: 800; }
+.swap-toggle { min-height: 44px; background: var(--surface); color: var(--text); }
+.swap-row.is-free .swap-toggle:not([aria-pressed="true"]) { background: var(--accent); color: var(--surface); }
 .swap-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); }
+.swap-icon { font-size: 1.1rem; line-height: 1; }
 .swap-caption { color: var(--muted); font-size: .85rem; font-weight: 700; }
+.swap-row.is-free .swap-caption { padding: 3px 10px; border: 2px solid var(--ink); border-radius: 999px; background: var(--surface); color: var(--text); font-weight: 900; }
 .swap-hint { flex-basis: 100%; margin: 0; color: var(--accent); font-size: .9rem; font-weight: 800; }
 .hand-grid.is-swapping > .answer-card { outline: 3px dashed var(--accent); outline-offset: 3px; }
 .swap-dialog { width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; color: var(--text); }
@@ -611,6 +616,7 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
 @keyframes fill-pop { from { opacity: .3; } to { opacity: 1; } }
 @keyframes badge-pop { 0% { transform: scale(.3); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
 @keyframes ready-pulse { 0%, 100% { box-shadow: 0 4px 0 var(--ink), inset 0 2px 0 #ffffff55, 0 0 0 0 color-mix(in srgb, var(--primary) 50%, transparent); } 50% { box-shadow: 0 4px 0 var(--ink), inset 0 2px 0 #ffffff55, 0 0 0 8px transparent; } }
+@keyframes swap-nudge { 0%, 100% { rotate: 0deg; } 20% { rotate: -4deg; } 40% { rotate: 4deg; } 60% { rotate: -2deg; } 80% { rotate: 2deg; } }
 @keyframes hero-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -6px; } }
 @keyframes rays-spin { to { rotate: 360deg; } }
 @keyframes title-pop { from { transform: scale(.6) rotate(-6deg); opacity: 0; } }
@@ -633,6 +639,7 @@ input:focus, select:focus { border-color: var(--accent); outline: none; box-shad
   .result-particles > span { animation: short-spark .9s ease-out forwards; }
   .start-button:not(:disabled), .dock-send:not(:disabled), .action-bar.is-ready .primary:not(:disabled) { animation: ready-pulse 1.6s ease-in-out infinite; }
   .hero-deck { animation: hero-float 3.2s ease-in-out infinite; }
+  .swap-row.is-free .swap-toggle:not([aria-pressed="true"]) { animation: swap-nudge .7s ease-in-out .6s 2; }
   .hero-title { animation: title-pop .5s cubic-bezier(.2, 1.5, .5, 1) backwards; }
   .final-result.has-champion { background-size: 100% 100%; }
 }
